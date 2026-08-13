@@ -27,9 +27,12 @@
  *
  * 永不抛出：落盘失败仅返回 null / 路径，不阻断主流程。
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { ATRun } from '../agentteams-adapter';
+
+// ⚠️ 不得在模块顶层静态 import node:fs / node:path：
+// 浏览器（web 预览 5174 / Demo 页）加载时会因「Dynamic require of fs/promises」
+// 直接崩溃整个 React 挂载。仅在 Node 分支内用动态 import() 惰性加载，
+// 浏览器永不执行这些分支，从而不会触发 node 内置模块求值。
 
 /** node 默认落盘目录（相对 cwd，即项目根） */
 const DEFAULT_DIR = 'dist-web/traces';
@@ -64,6 +67,8 @@ function replayRunBrowser(runId: string): ATRun | null {
 /* ───────────── Node（dist-web/traces/*.jsonl） ───────────── */
 
 async function sinkRunNode(run: ATRun, dirOverride?: string): Promise<string> {
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
   const dir = dirOverride ?? DEFAULT_DIR;
   await mkdir(dir, { recursive: true });
   const file = join(dir, `run-${run.runId}.jsonl`);
@@ -73,6 +78,8 @@ async function sinkRunNode(run: ATRun, dirOverride?: string): Promise<string> {
 }
 
 async function replayRunNode(runId: string, dirOverride?: string): Promise<ATRun | null> {
+  const { readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
   const dir = dirOverride ?? DEFAULT_DIR;
   try {
     const raw = await readFile(join(dir, `run-${runId}.jsonl`), 'utf8');

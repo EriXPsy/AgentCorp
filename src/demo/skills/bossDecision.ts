@@ -40,8 +40,8 @@ export function reviewBossDecision(input: BossReviewInput): BossReviewOutput {
   const verdict = input.evaluation.verdict;
   const confidence = input.evaluation.confidence;
 
-  let action: BossAction = 'reject';
-  let reason = '';
+  let action: BossAction;
+  let reason: string;
   let requiresHumanAck = false;
 
   if (bias.unstable) {
