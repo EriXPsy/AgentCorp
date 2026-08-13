@@ -1,0 +1,42 @@
+# 第三方许可证（Third-Party Licenses）
+
+本文件记录 AgentCorp 仓库中打包引入的外部开源组件及其许可证，供合规审查与分发使用。
+
+---
+
+## agency-agents-zh（人才市场候选池数据源）
+
+- **仓库**：https://github.com/jnMetaCode/agency-agents-zh
+- **上游英文版**：https://github.com/msitarzewski/agency-agents
+- **许可证**：MIT
+- **接入方式**：`scripts/gen-agency-candidates.mjs` 解析其 268 个角色 Markdown 文件，
+  投影为 `src/demo/data/agencyAgentsCandidates.ts`（CandidateRoleCard[]）。
+- **预处理说明**：候选 persona 截断至前 2000 字（完整定义见源仓库），细分字段（规则/交付物/流程）
+  各截断至 800 字，以控制包体积；完整角色定义版权归 agency-agents-zh 原作者所有。
+- **数据用途**：仅作为 AgentCorp「人才市场」的候选供给层；评价与决策由 AgentCorp 自身
+  HR 面试闭环（judgeEnsemble / pass^k / boss_review）负责。AgentCorp 不主张这些角色定义的著作权。
+
+### MIT License（原文）
+
+MIT License
+
+Copyright (c) 2025 Michael Sitarzewski (original English version)
+Copyright (c) 2026 jnMetaCode (Chinese translation and localization)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
