@@ -16,6 +16,7 @@
  * boss（老板）→ recruiter（HR 面试）→ evaluator（评估中心）→ boss（拍板）端到端闭环。
  */
 import type { RadarScore, RadarDim, Verdict, BossProfile } from '@/types/evaluation';
+import { reviewBossDecision, type BossAction } from './skills/bossDecision';
 import { RADAR_DIMS } from '@/engine/scoring/registry';
 import { aggregateRadars, majorityVerdict } from '@/services/judgeEnsemble';
 import { passK, type PassKResult } from '@/engine/evaluation/passK';
@@ -70,7 +71,7 @@ export interface LoopStep {
   ts: number;
 }
 
-export type BossAction = 'hire' | 'observe' | 'reject' | 'rollback';
+export type { BossAction } from './skills/bossDecision';
 
 export interface ClosedLoopResult {
   request: ClosedLoopRequest;
@@ -104,10 +105,21 @@ export interface ClosedLoopResult {
     approvedBy: 'boss';
     requiresHumanAck: boolean;
   };
-  /** 经验沉淀（precipitate：可复用规则） */
+  /** 经验沉淀（precipitate：可复用规则 · 自然语言） */
   experience: string;
+  /** 经验沉淀（precipitate：结构化可复用规则，供 boss_review / 经验复用直接消费） */
+  precipitatedRule: PrecipitatedRule;
   /** 全链路轨迹（evidence：执行证据） */
   trace: LoopStep[];
+}
+
+/** 结构化经验沉淀（precipitate）：与 boss_review / 经验复用直接对接，避免只存自然语言。 */
+export interface PrecipitatedRule {
+  weakestDim: RadarDim;
+  strongestDim: RadarDim;
+  trainingFocus: string;
+  reuseValue: string;
+  summary: string;
 }
 
 const verdictLabel: Record<Verdict, string> = {
@@ -197,24 +209,15 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
   });
 
   // ── Step 4 · approve：boss 拍板（高风险动作需人工确认）──
-  let action: BossAction = 'reject';
-  let reason = '';
-  let requiresHumanAck = false;
-  if (bias.unstable) {
-    action = 'rollback';
-    requiresHumanAck = true;
-    reason = `评委离散度偏高（maxSpread=${bias.maxSpread} > 阈值）：结论不稳定，触发回滚并要求人工复核。`;
-  } else if (pk.allPass && verdict === 'MVP' && confidence >= 0.7) {
-    action = 'hire';
-    requiresHumanAck = true; // 录用是高风险写动作，需人类二次确认
-    reason = `六维全达标（pass^k allPass=true）且判定为 ${verdictLabel.MVP}、置信度 ${confidence}：建议录用。`;
-  } else if (pk.passRate >= 0.6 && (verdict === 'MVP' || verdict === 'OBSERVE')) {
-    action = 'observe';
-    reason = `通过率 ${pk.passRate}、判定 ${verdict ? verdictLabel[verdict] : '未知'}：暂观察，不立即录用。`;
-  } else {
-    action = 'reject';
-    reason = `通过率 ${pk.passRate} 不足或其他未达标：执行 You are fired。`;
-  }
+  // 决策逻辑收敛到 boss_review Skill 的唯一真源（skills/bossDecision.ts），
+  // 使闭环 approve 与 boss_review handler 决策一致、可单测。
+  const bd = reviewBossDecision({
+    evaluation: { passK: pk, biasAudit: bias, verdict, confidence },
+    bossProfile: req.bossProfile,
+  });
+  const action: BossAction = bd.action;
+  const reason = bd.reason;
+  const requiresHumanAck = bd.requiresHumanAck;
   push('approve', 'boss', `老板决策：${action.toUpperCase()}。${reason}（需人工确认=${requiresHumanAck}）`, {
     action,
     requiresHumanAck,
@@ -229,6 +232,14 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
   const weakest = RADAR_DIMS.reduce((a, b) => ((meanRadar[a] ?? 0) <= (meanRadar[b] ?? 0) ? a : b));
   const strongest = RADAR_DIMS.reduce((a, b) => ((meanRadar[a] ?? 0) >= (meanRadar[b] ?? 0) ? a : b));
   const experience = `经验规则：对「${req.candidateName}」类候选，优先考察最强维「${strongest}」的复用价值；最弱维「${weakest}」需在下一轮面试定向追问（pass^k 未全达标的维度=训练重点）。`;
+  // 结构化经验沉淀（precipitatedRule）：供 boss_review Skill 与经验复用直接消费
+  const precipitatedRule: PrecipitatedRule = {
+    weakestDim: weakest,
+    strongestDim: strongest,
+    trainingFocus: `下一轮面试定向追问最弱维「${weakest}」（pass^k 未全达标的维度=训练重点）`,
+    reuseValue: `优先考察最强维「${strongest}」的复用价值`,
+    summary: experience,
+  };
   push('precipitate', 'boss', experience);
 
   return {
@@ -238,6 +249,7 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
     evaluation: { radars, meanRadar, verdict, confidence, passK: pk, biasAudit: bias, source },
     bossDecision: { action, reason, approvedBy: 'boss', requiresHumanAck },
     experience,
+    precipitatedRule,
     trace,
   };
 }

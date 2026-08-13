@@ -15,7 +15,8 @@
  */
 import type { RoleCard } from '@/engine/agents/roleCard';
 import { ROLE_CARDS, ROLE_CARD_BY_ID } from '@/engine/agents/roleCard';
-import { runClosedLoop, type ClosedLoopRequest, type ClosedLoopResult, type LoopStep } from './closedLoop';
+import { type ClosedLoopResult, type LoopStep } from './closedLoop';
+import { getSkill, type SkillDefinition, type SkillResult } from './skills/registry';
 import { demoJudge } from './liveJudge';
 
 /* ───────────── AgentTeams 形态基元（薄映射类型，非第三方依赖） ───────────── */
@@ -68,8 +69,63 @@ export interface ATRun {
     agent: string;
     summary: string;
     status: 'ok' | 'warn' | 'blocked';
+    /** 该步对应的 Skill id（经验沉淀/审批回滚已迁至 boss_review Skill） */
+    skill?: string;
   }>;
   result?: ClosedLoopResult;
+}
+
+/* ───────────── AgentTeams · Skill（薄映射，对应 GOAI 2.1 Skill 清单 + 调用入口） ───────────── */
+
+/**
+ * AgentTeams · Skill：可被编排执行的 Skill（对应 GOAI 2.1 Skill 清单 2.1 全字段 + 调用入口）。
+ * 底层由 skills/registry 的真实 Skill 定义驱动（registry 持有 handler）。
+ */
+export interface ATSkill {
+  id: string;
+  name: string;
+  ownerAgent: string;
+  boundaries: {
+    allowed: string[];
+    forbidden: string[];
+    riskLevel: string;
+    requiresApproval: boolean;
+  };
+}
+
+/** Skill id → 归属 Agent 角色（团队协同校验用，不阻断全局注册表执行） */
+const SKILL_OWNER_ROLE: Record<string, string> = {
+  agent_interview: 'recruiter',
+  capability_assessment: 'evaluator',
+  reliability_audit: 'evaluator',
+  boss_review: 'boss',
+  orchestrate: 'dispatcher',
+};
+
+/**
+ * 通过 Skill 注册表调用一个 Skill（薄委托：查 registry → 调 handler）。
+ * 未知 Skill 或任意异常都降级为 degraded 结果，不向上抛，保证编排永不 panic。
+ */
+export async function invokeSkill(team: ATTeam, skillId: string, args: any): Promise<SkillResult> {
+  const skill: SkillDefinition | undefined = getSkill(skillId);
+  if (!skill) {
+    return { ok: false, degraded: true, reason: `unknown skill: ${skillId}` };
+  }
+  // 团队协同校验：该 Skill 归属角色须存在于团队（缺失仅降级，不阻断全局注册表执行）
+  const ownerRole = SKILL_OWNER_ROLE[skillId];
+  if (ownerRole && !team.agents.some((a) => a.role === ownerRole)) {
+    return {
+      ok: false,
+      degraded: true,
+      reason: `skill ${skillId} 的归属角色 ${ownerRole} 不在团队 ${team.teamId} 中`,
+    };
+  }
+  try {
+    // 直接透传 handler 的 SkillResult（不二次包裹），调用方按 r.ok / r.data 取用
+    return await skill.handler(args);
+  } catch (e) {
+    return { ok: false, degraded: true, reason: String(e) };
+  }
 }
 
 /* ───────────── 映射函数（roleCard → AgentTeams 基元） ───────────── */
@@ -127,35 +183,70 @@ function stepStatus(s: LoopStep): 'ok' | 'warn' | 'blocked' {
   return 'ok';
 }
 
+/** 把 trace 步骤映射到该阶段对应的 Skill id（经验沉淀/审批回滚已迁至 boss_review Skill） */
+function agentSkillOf(s: LoopStep): string | undefined {
+  if (s.agentName === 'recruiter') return 'agent_interview';
+  if (s.agentName === 'evaluator' && s.phase === 'tool') return 'capability_assessment';
+  if (s.agentName === 'evaluator' && s.phase === 'verify') return 'reliability_audit';
+  if (s.agentName === 'boss') return 'boss_review';
+  if (s.agentName === 'dispatcher') return 'orchestrate';
+  return undefined;
+}
+
 /**
- * 运行 Task（薄委托）：底层调用既有 runClosedLoop（OpenClaw 评估科学），
- * 仅把结果投影成 AgentTeams Run 形态。底层不是 AgentTeams 引擎，
- * 但语义上满足「协同设计基点」的全部对照要求。
+ * 运行 Task（薄委托）：底层通过 Skill 注册表调用 orchestrate Skill（→ runClosedLoop），
+ * 仅把结果投影成 AgentTeams Run 形态。既走 invokeSkill（真实 Skill 调用），
+ * 又保留底层 OpenClaw 评估科学；boss_review Skill 一并驱动做一致性展示。
  */
 export async function runTask(team: ATTeam, task: ATTask): Promise<ATRun> {
   const runId = `run-${task.taskId}-${Date.now()}`;
-  const req: ClosedLoopRequest = {
+
+  // 组装 orchestrate Skill 入参并真实调用（handler 内部委托 runClosedLoop）
+  const orchestrateArgs = {
     requirement: task.requirement,
     candidateId: task.candidateId,
     candidateName: task.candidateName,
-    candidatePersona: task.transcript.slice(0, 0), // persona 由面试转录体现
     transcript: task.transcript,
+    bossProfile: undefined,
     k: 3,
     threshold: 3.5,
     judge: demoJudge,
   };
-  const result = await runClosedLoop(req);
+  const orch = await invokeSkill(team, 'orchestrate', orchestrateArgs);
+  if (!orch.ok || !orch.data) {
+    // orchestrate Skill 降级（如评委全不可达）：Run 标 failed，不抛不挂
+    return {
+      runId,
+      teamId: team.teamId,
+      taskId: task.taskId,
+      status: 'failed',
+      steps: [],
+      result: undefined,
+    };
+  }
+  const result = orch.data as ClosedLoopResult;
+
+  // 演示 boss_review Skill 是真的活的：其 data 应与 result.bossDecision 一致（一致性展示，不强制断言）
+  const bossInvoke = await invokeSkill(team, 'boss_review', { evaluation: result.evaluation, bossProfile: undefined });
+  void bossInvoke;
+
+  const status: ATRun['status'] =
+    result.bossDecision.action === 'rollback' ? 'failed' : 'completed';
+
+  const steps = result.trace.map((s) => ({
+    phase: s.phase,
+    agent: s.agentName,
+    summary: s.summary,
+    status: stepStatus(s),
+    skill: agentSkillOf(s),
+  }));
+
   return {
     runId,
     teamId: team.teamId,
     taskId: task.taskId,
-    status: result.bossDecision.action === 'rollback' ? 'failed' : 'completed',
-    steps: result.trace.map((s) => ({
-      phase: s.phase,
-      agent: s.agentName,
-      summary: s.summary,
-      status: stepStatus(s),
-    })),
+    status,
+    steps,
     result,
   };
 }
