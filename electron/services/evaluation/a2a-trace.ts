@@ -16,6 +16,28 @@ import { join } from 'node:path';
 import { getOpenClawConfigDir } from '../../utils/paths';
 import type { A2aTraceRecord } from '../../../src/types/evaluation';
 
+/**
+ * ════════════ 与 src/demo/observability/traceSink.ts 字段对齐（GOAI SP-11） ════════════
+ * 主进程 A2A 委派 trace 与 Demo 闭环 Run trace 共享同一套「协同执行轨迹」语义，
+ * 可互为投影、统一落 OTel span：
+ *
+ *   A2aTraceRecord            ↔  ATRun / LoopStep (Demo traceSink)
+ *   ─────────────────────────    ───────────────────────────────────────
+ *   trace_id (uuid)           ↔  runId（一次 Run 一条链路，OTel trace_id）
+ *   task_id                   ↔  taskId
+ *   delegator (agent:leader)  ↔  step.agent（执行该步的 Agent 名）
+ *   delegatee / channel       ↔  step.skill（该步调用的 Skill id）
+ *   state                     ↔  step.status（ok / warn / blocked）
+ *   summary                   ↔  step.summary（该步产出摘要）
+ *   sent_at (ISO8601)         ↔  step.ts（毫秒时间戳）
+ *   root_session_id           ↔  runId（落盘关联键 / 回放主键）
+ *
+ * 二者均投影为 OTel GenAI span（见 src/demo/observability/otelGenai.ts）：
+ *   gen_ai.conversation.id = runId/trace_id，gen_ai.agent.name = agent/delegator，
+ *   gen_ai.operation.name = phase/state。
+ * ══════════════════════════════════════════════════════════════════════════════════════════
+ */
+
 /** trace 落盘目录（~/.openclaw/a2a-traces） */
 export function getA2aTracesDir(): string {
   return join(getOpenClawConfigDir(), 'a2a-traces');

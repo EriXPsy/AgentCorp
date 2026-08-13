@@ -62,6 +62,14 @@ const routeHandlers: RouteHandler[] = [
 ];
 
 /**
+ * ════════════ Host API = MCP 等价契约承载面（GOAI SP-13 / 见 docs/artifacts/mcp-equivalent-contract.md） ════════════
+ * 上面每个 routeHandler 在语义上等价于一个 MCP tool；与 `PORTS.CLAWX_HOST_API (3210)` 一同构成
+ * 「AgentTeams 兼容薄适配」的对外调用面。所有请求鉴权用 `x-clawx-host-session`（见 isAuthorizedHostApiRequest）。
+ * 复赛迁移到真 MCP 时，这些 handler 逐 tool 1:1 映射，角色卡/Skill/评估科学全部复用。
+ * ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+ */
+
+/**
  * Per-session secret token used to authenticate Host API requests.
  * Generated once at server start and shared with the renderer via IPC.
  * This prevents cross-origin attackers from reading sensitive data even

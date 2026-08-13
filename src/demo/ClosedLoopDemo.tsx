@@ -2,12 +2,18 @@
  * GOAI 多 Agent 闭环演示页（web 预览 5174 可用，路径 /demo.html）。
  * 展示 boss → recruiter → evaluator → boss 端到端闭环，并把每一步对齐 GOAI 八步闭环。
  * 评委默认走 demoJudge（真实网关可达用真评委，否则降级 mock，闭环永不中断）。
+ *
+ * SP-05：本页不再直接调 runClosedLoop，而是走 AgentTeams 薄适配的
+ *   createTeam → createTask → runTask，步骤面板标注「Agent + Skill」（run.steps[].skill），
+ *   与复赛「以 AgentTeams 为协同设计基点」对齐。
+ * SP-10：新增「保存轨迹 / 回放」按钮，把一次 Run 落盘（traceSink）并可回放复盘。
  */
 import { useState } from 'react';
 import { ROLE_CARDS } from '@/engine/agents/roleCard';
-import { runClosedLoop, phaseLabel, type ClosedLoopResult, type ClosedLoopRequest, type LoopStep } from './closedLoop';
-import { demoJudge } from './liveJudge';
+import { createTeam, createTask, runTask, type ATRun } from './agentteams-adapter';
+import { phaseLabel, type ClosedLoopResult } from './closedLoop';
 import { RADAR_DIMS } from '@/engine/scoring/registry';
+import { sinkRun, replayRun } from './observability/traceSink';
 
 const SAMPLE = {
   requirement: '招聘一名能独立承担前端组件库开发的 Agent 工程师，要求稳定可靠、沟通清晰。',
@@ -24,30 +30,54 @@ const actionColor: Record<string, string> = {
   reject: '#c62828',
   rollback: '#6a1b9a',
 };
+const statusColor: Record<string, string> = {
+  ok: '#2e7d32',
+  warn: '#ef6c00',
+  blocked: '#c62828',
+};
 
 export default function ClosedLoopDemo() {
   const [req, setReq] = useState({ ...SAMPLE, candidateId: 'fe-agent-07' });
-  const [result, setResult] = useState<ClosedLoopResult | null>(null);
+  const [run, setRun] = useState<ATRun | null>(null);
   const [running, setRunning] = useState(false);
+  const [sinkMsg, setSinkMsg] = useState('');
+  const [replay, setReplay] = useState<ATRun | null>(null);
 
-  const run = async () => {
+  const result: ClosedLoopResult | undefined = run?.result;
+
+  const runLoop = async () => {
     setRunning(true);
+    setSinkMsg('');
+    setReplay(null);
     try {
-      const payload: ClosedLoopRequest = {
+      // SP-05：走 AgentTeams 薄适配（createTeam → createTask → runTask）
+      const team = createTeam();
+      const task = createTask({
+        title: req.requirement,
         requirement: req.requirement,
         candidateId: req.candidateId,
         candidateName: req.candidateName,
         candidatePersona: req.candidatePersona,
         transcript: req.transcript,
-        k: 3,
-        threshold: 3.5,
-        judge: demoJudge,
-      };
-      const res = await runClosedLoop(payload);
-      setResult(res);
+      });
+      const r = await runTask(team, task);
+      setRun(r);
     } finally {
       setRunning(false);
     }
+  };
+
+  const saveTrace = async () => {
+    if (!run) return;
+    const loc = await sinkRun(run);
+    setSinkMsg(`已保存轨迹 → ${loc}`);
+  };
+
+  const replayTrace = async () => {
+    if (!run) return;
+    const r = await replayRun(run.runId);
+    setReplay(r);
+    setSinkMsg(r ? `已回放 Run ${r.runId}（status=${r.status}, steps=${r.steps.length}）` : '回放失败：未找到轨迹');
   };
 
   return (
@@ -81,64 +111,97 @@ export default function ClosedLoopDemo() {
       <label style={labelStyle}>面试转录（recruiter 产出，交接 evaluator）</label>
       <textarea style={taStyle} value={req.transcript} onChange={(e) => setReq({ ...req, transcript: e.target.value })} />
 
-      <button onClick={run} disabled={running} style={{ marginTop: 12, padding: '10px 18px', fontSize: 15, borderRadius: 8, border: 'none', background: '#1a1c1e', color: '#fff', cursor: running ? 'default' : 'pointer' }}>
+      <button onClick={runLoop} disabled={running} style={{ marginTop: 12, padding: '10px 18px', fontSize: 15, borderRadius: 8, border: 'none', background: '#1a1c1e', color: '#fff', cursor: running ? 'default' : 'pointer' }}>
         {running ? '运行中…' : '▶ 运行闭环（boss→recruiter→evaluator→boss）'}
       </button>
 
-      {result && (
+      {run && (
         <div style={{ marginTop: 24 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>Run {run.runId}</span>
+            <span style={{ fontSize: 12, color: statusColor[run.status === 'completed' ? 'ok' : 'blocked'] }}>status={run.status}</span>
+            {typeof run.tokenEstimate === 'number' && (
+              <span style={{ fontSize: 12, color: '#555' }}>· 估算 token≈{run.tokenEstimate}</span>
+            )}
+            <button onClick={saveTrace} style={btnStyle}>💾 保存轨迹</button>
+            <button onClick={replayTrace} style={btnStyle}>⤴ 回放</button>
+          </div>
+          {sinkMsg && <div style={{ fontSize: 12, color: '#2e7d32', marginTop: 4 }}>{sinkMsg}</div>}
+
           <h2 style={{ fontSize: 18 }}>闭环结果</h2>
 
-          <Section title="① 编排计划（dispatcher 拆解）">
-            <div style={{ fontSize: 13 }}>目标维度：{result.plan.targetDims.join(' / ')}</div>
-            <ol style={{ fontSize: 13, margin: '4px 0' }}>{result.plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+          <Section title="① 编排计划（dispatcher 动态拆解）">
+            {result ? (
+              <>
+                <div style={{ fontSize: 13 }}>目标维度：{result.plan.targetDims.join(' / ')}</div>
+                <ol style={{ fontSize: 13, margin: '4px 0' }}>{result.plan.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+              </>
+            ) : <div style={{ fontSize: 13, color: '#c62828' }}>闭环未产出结果（评委降级）。</div>}
           </Section>
 
-          <Section title="② 评估中心结论（evaluator · tool+verify）">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {RADAR_DIMS.map((d) => {
-                const v = result.evaluation.meanRadar[d] ?? 0;
-                return (
-                  <div key={d} style={{ width: 150 }}>
-                    <div style={{ fontSize: 12 }}>{d}：{v}</div>
-                    <div style={{ height: 8, background: '#eee', borderRadius: 4 }}>
-                      <div style={{ height: 8, width: `${(v / 5) * 100}%`, background: '#3b82f6', borderRadius: 4 }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 13, marginTop: 8 }}>
-              判定：<b>{result.evaluation.verdict}</b> · 置信度：{result.evaluation.confidence} · 来源：{result.evaluation.source}
-            </div>
-            <div style={{ fontSize: 13 }}>
-              pass^k：allPass={String(result.evaluation.passK.allPass)} · passRate={result.evaluation.passK.passRate} · k={result.evaluation.passK.k}
-            </div>
-            <div style={{ fontSize: 13, color: result.evaluation.biasAudit.unstable ? '#c62828' : '#555' }}>
-              偏差审计：unstable={String(result.evaluation.biasAudit.unstable)} · maxSpread={result.evaluation.biasAudit.maxSpread}
-            </div>
-          </Section>
-
-          <Section title="③ 老板拍板（approve · 高风险需人工确认）">
-            <div style={{ fontSize: 15, fontWeight: 700, color: actionColor[result.bossDecision.action] }}>
-              {result.bossDecision.action.toUpperCase()}
-            </div>
-            <div style={{ fontSize: 13 }}>{result.bossDecision.reason}</div>
-            <div style={{ fontSize: 12, color: '#777' }}>需人工确认：{String(result.bossDecision.requiresHumanAck)}</div>
-          </Section>
-
-          <Section title="④ 经验沉淀（precipitate · 可复用规则）">
-            <div style={{ fontSize: 13 }}>{result.experience}</div>
-          </Section>
-
-          <Section title="⑤ 全链路执行轨迹（evidence · Trace）">
-            {result.trace.map((s: LoopStep, i: number) => (
+          <Section title="② 执行轨迹（evidence · Agent + Skill 标注）">
+            {run.steps.map((s, i) => (
               <div key={i} style={{ fontSize: 12, padding: '4px 0', borderBottom: '1px dashed #eee' }}>
-                <span style={{ color: '#3b82f6', fontWeight: 600 }}>[{phaseLabel[s.phase]}]</span>{' '}
-                <span style={{ color: '#555' }}>{s.agentName}：</span>{s.summary}
+                <span style={{ color: '#3b82f6', fontWeight: 600 }}>[{phaseLabel[s.phase as keyof typeof phaseLabel] ?? s.phase}]</span>{' '}
+                <span style={{ color: '#555' }}>{s.agent}</span>
+                {s.skill && <span style={{ marginLeft: 6, fontSize: 11, background: '#eef', color: '#336', borderRadius: 4, padding: '1px 6px' }}>skill:{s.skill}</span>}
+                <span style={{ marginLeft: 6, fontSize: 11, color: statusColor[s.status] }}>●{s.status}</span>
+                ：{s.summary}
               </div>
             ))}
           </Section>
+
+          {result && (
+            <>
+              <Section title="③ 评估中心结论（evaluator · tool+verify）">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {RADAR_DIMS.map((d) => {
+                    const v = result.evaluation.meanRadar[d] ?? 0;
+                    return (
+                      <div key={d} style={{ width: 150 }}>
+                        <div style={{ fontSize: 12 }}>{d}：{v}</div>
+                        <div style={{ height: 8, background: '#eee', borderRadius: 4 }}>
+                          <div style={{ height: 8, width: `${(v / 5) * 100}%`, background: '#3b82f6', borderRadius: 4 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 13, marginTop: 8 }}>
+                  判定：<b>{result.evaluation.verdict}</b> · 置信度：{result.evaluation.confidence} · 来源：{result.evaluation.source}
+                </div>
+                <div style={{ fontSize: 13 }}>
+                  pass^k：allPass={String(result.evaluation.passK.allPass)} · passRate={result.evaluation.passK.passRate} · k={result.evaluation.passK.k}
+                </div>
+                <div style={{ fontSize: 13, color: result.evaluation.biasAudit.unstable ? '#c62828' : '#555' }}>
+                  偏差审计：unstable={String(result.evaluation.biasAudit.unstable)} · maxSpread={result.evaluation.biasAudit.maxSpread}
+                </div>
+              </Section>
+
+              <Section title="④ 老板拍板（approve · 高风险需人工确认）">
+                <div style={{ fontSize: 15, fontWeight: 700, color: actionColor[result.bossDecision.action] }}>
+                  {result.bossDecision.action.toUpperCase()}
+                </div>
+                <div style={{ fontSize: 13 }}>{result.bossDecision.reason}</div>
+                <div style={{ fontSize: 12, color: '#777' }}>需人工确认：{String(result.bossDecision.requiresHumanAck)}</div>
+              </Section>
+
+              <Section title="⑤ 经验沉淀（precipitate · 可复用规则）">
+                <div style={{ fontSize: 13 }}>{result.experience}</div>
+                {result.priorExperience.length > 0 && (
+                  <div style={{ fontSize: 12, color: '#555', marginTop: 6 }}>
+                    复用历史经验 {result.priorExperience.length} 条：{result.priorExperience.map((r) => r.weakestDim).join('/')}
+                  </div>
+                )}
+              </Section>
+            </>
+          )}
+
+          {replay && (
+            <Section title="⤴ 回放结果">
+              <div style={{ fontSize: 13 }}>status={replay.status} · steps={replay.steps.length} · tokenEstimate≈{replay.tokenEstimate}</div>
+            </Section>
+          )}
         </div>
       )}
     </div>
@@ -148,6 +211,7 @@ export default function ClosedLoopDemo() {
 const labelStyle: React.CSSProperties = { display: 'block', fontSize: 13, marginTop: 12, fontWeight: 600 };
 const taStyle: React.CSSProperties = { width: '100%', minHeight: 64, marginTop: 4, padding: 8, borderRadius: 6, border: '1px solid #ccc', fontFamily: 'inherit' };
 const inputStyle: React.CSSProperties = { width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontFamily: 'inherit' };
+const btnStyle: React.CSSProperties = { padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid #ccc', background: '#fff', cursor: 'pointer' };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

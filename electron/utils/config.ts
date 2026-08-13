@@ -21,6 +21,15 @@ export const PORTS = {
 } as const;
 
 /**
+ * ════════════ Host API 即「MCP 等价契约」承载面（GOAI SP-13 / 见 docs/artifacts/mcp-equivalent-contract.md） ════════════
+ * `CLAWX_HOST_API (3210)` 上的每个路由（见 electron/api/server.ts 的 routeHandlers）在语义上
+ * 等价于一个 MCP tool：evaluate.run / chat-judge / arena.compare / arena.user-pick / agents.* / convergence.*。
+ * 鉴权统一用 `x-clawx-host-session`；RPC 帧为 { type, id, method, params }。
+ * 复赛迁移到真 MCP 时，这些路由逐 tool 1:1 映射，无需重设计角色卡/Skill。
+ * ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+ */
+
+/**
  * Get port from environment or default
  */
 export function getPort(key: keyof typeof PORTS): number {

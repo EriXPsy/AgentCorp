@@ -23,6 +23,7 @@ import { passK, type PassKResult } from '@/engine/evaluation/passK';
 import { auditJudgeBias, type JudgeBiasAudit } from '@/services/judgeClient';
 import type { RoleCard, ClosedLoopPhase } from '@/engine/agents/roleCard';
 import { ROLE_CARD_BY_ID } from '@/engine/agents/roleCard';
+import { saveRule, loadRules } from './skills/experienceStore';
 
 /** 注入式评委：真实 judgeClient 或 mock 都实现此签名。 */
 export interface JudgeFnInput {
@@ -59,6 +60,8 @@ export interface ClosedLoopRequest {
   threshold?: number;
   /** 注入的评委（真实或 mock） */
   judge: JudgeFn;
+  /** 注入的历史经验规则（经验复用闭环）；省略时自动从经验 Store 按 candidateId 读取 */
+  priorExperience?: PrecipitatedRule[];
 }
 
 /** 单步轨迹（执行证据 = Trace，对应 GOAI 2.3 可观测 + 1.3 evidence） */
@@ -111,6 +114,8 @@ export interface ClosedLoopResult {
   precipitatedRule: PrecipitatedRule;
   /** 全链路轨迹（evidence：执行证据） */
   trace: LoopStep[];
+  /** 本次闭环复用的历史经验规则（来自经验 Store 或入参注入；经验复用闭环实证） */
+  priorExperience: PrecipitatedRule[];
 }
 
 /** 结构化经验沉淀（precipitate）：与 boss_review / 经验复用直接对接，避免只存自然语言。 */
@@ -152,6 +157,13 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
   const k = req.k ?? 3;
   const threshold = req.threshold ?? 3.5;
 
+  // 经验复用闭环（SP-08）：读取历史经验（入参注入优先，否则从经验 Store 按 candidateId 取）
+  const priorExperience: PrecipitatedRule[] = req.priorExperience ?? loadRules(req.candidateId);
+  const priorBrief =
+    priorExperience.length > 0
+      ? `（已复用历史经验 ${priorExperience.length} 条：最弱维优先追问 ${priorExperience.map((r) => r.weakestDim).join('/')}）`
+      : '';
+
   // ── Step 0 · input：boss 接收任务输入 ──
   push('input', 'boss', `老板接收招聘需求：${req.requirement.slice(0, 60)}…`);
 
@@ -168,7 +180,7 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
     candidateId: req.candidateId,
     transcriptLen: req.transcript.length,
     targetDims: RADAR_DIMS,
-    note: `基于候选 persona 完成结构化面试，转录长度 ${req.transcript.length} 字符，交接至评估中心。`,
+    note: `基于候选 persona 完成结构化面试，转录长度 ${req.transcript.length} 字符，交接至评估中心。${priorBrief}`,
   };
   push('context', 'recruiter', interviewReport.note, interviewReport);
 
@@ -231,7 +243,7 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
   // ── Step 6 · precipitate：经验沉淀（可复用规则）──
   const weakest = RADAR_DIMS.reduce((a, b) => ((meanRadar[a] ?? 0) <= (meanRadar[b] ?? 0) ? a : b));
   const strongest = RADAR_DIMS.reduce((a, b) => ((meanRadar[a] ?? 0) >= (meanRadar[b] ?? 0) ? a : b));
-  const experience = `经验规则：对「${req.candidateName}」类候选，优先考察最强维「${strongest}」的复用价值；最弱维「${weakest}」需在下一轮面试定向追问（pass^k 未全达标的维度=训练重点）。`;
+  const experience = `经验规则：对「${req.candidateName}」类候选，优先考察最强维「${strongest}」的复用价值；最弱维「${weakest}」需在下一轮面试定向追问（pass^k 未全达标的维度=训练重点）。${priorBrief ? `历史经验印证：${priorBrief}` : ''}`;
   // 结构化经验沉淀（precipitatedRule）：供 boss_review Skill 与经验复用直接消费
   const precipitatedRule: PrecipitatedRule = {
     weakestDim: weakest,
@@ -242,6 +254,9 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
   };
   push('precipitate', 'boss', experience);
 
+  // 经验复用闭环（SP-08）：沉淀本轮结构化规则，供下一轮按 candidateId 复用
+  saveRule(req.candidateId, precipitatedRule);
+
   return {
     request: req,
     plan,
@@ -251,6 +266,7 @@ export async function runClosedLoop(req: ClosedLoopRequest): Promise<ClosedLoopR
     experience,
     precipitatedRule,
     trace,
+    priorExperience,
   };
 }
 

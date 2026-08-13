@@ -51,4 +51,19 @@ describe('AgentTeams 薄适配（决策 X 实证）', () => {
     expect(run.result?.bossDecision.action).toBeTruthy();
     expect(ROLE_CARDS.length).toBeGreaterThanOrEqual(3);
   });
+
+  it('SP-06 dispatcher 动态拆解按岗位生成 decomposition（非硬编码）', () => {
+    const backend = createTask({
+      title: '招募后端 Agent',
+      requirement: '招聘高并发后端服务 Agent',
+      candidateId: 'be-09',
+      candidateName: 'BackendAgent-09',
+      candidatePersona: '后端服务 Agent，擅长 Go/分布式。',
+      transcript: 'x',
+    });
+    expect(backend.decomposition[0]).toContain('recruiter');
+    expect(backend.decomposition[0]).toContain('后端'); // 岗位动态推断
+    expect(backend.decomposition[1]).toContain('evaluator');
+    expect(backend.decomposition[2]).toContain('boss');
+  });
 });

@@ -18,8 +18,15 @@ import { ROLE_CARDS, ROLE_CARD_BY_ID } from '@/engine/agents/roleCard';
 import { type ClosedLoopResult, type LoopStep } from './closedLoop';
 import { getSkill, type SkillDefinition, type SkillResult } from './skills/registry';
 import { demoJudge } from './liveJudge';
+import { RADAR_DIMS } from '@/engine/scoring/registry';
 
 /* ───────────── AgentTeams 形态基元（薄映射类型，非第三方依赖） ───────────── */
+
+/**
+ * token 估算常量（闭环无真实 token 计数，用字符数近似）。
+ * 估算式：EST_TOKEN_PER_CHAR × (转录长度 + 需求长度) × 2（输入 + 输出各一次）。
+ */
+const EST_TOKEN_PER_CHAR = 1.5;
 
 /** AgentTeams · Agent：身份定义（对应 GOAI 附录A + roleCard） */
 export interface ATAgent {
@@ -73,6 +80,8 @@ export interface ATRun {
     skill?: string;
   }>;
   result?: ClosedLoopResult;
+  /** token 估算（闭环无真实计数，用字符数近似：EST_TOKEN_PER_CHAR × (转录+需求) × 2） */
+  tokenEstimate?: number;
 }
 
 /* ───────────── AgentTeams · Skill（薄映射，对应 GOAI 2.1 Skill 清单 + 调用入口） ───────────── */
@@ -157,13 +166,53 @@ export function createTeam(teamId = 'agentcorp-core', cards: RoleCard[] = ROLE_C
   };
 }
 
-/** 由招聘需求构造 Task（含 dispatcher 拆解） */
+/**
+ * 由招聘需求 + 候选 persona 推断岗位（SP-06：dispatcher 角色卡拆解的依据之一）。
+ * 仅做轻量关键词匹配，命中即返回岗位名，否则回退「通用」。
+ */
+function inferRole(requirement: string, persona: string): string {
+  const text = `${requirement} ${persona}`;
+  const map: Array<[string, string]> = [
+    ['前端', '前端'],
+    ['react', '前端'],
+    ['组件库', '前端'],
+    ['后端', '后端'],
+    ['服务端', '后端'],
+    ['api', '后端'],
+    ['算法', '算法'],
+    ['模型', '算法'],
+    ['数据', '数据'],
+    ['运维', '运维'],
+    ['devops', '运维'],
+  ];
+  for (const [kw, role] of map) {
+    if (text.toLowerCase().includes(kw)) return role;
+  }
+  return '通用';
+}
+
+/**
+ * dispatcher 动态拆解任务（SP-06）：基于 RADAR_DIMS + 岗位生成 decomposition，
+ * 不再硬编码，使「任务拆解」步骤真实由 dispatcher 角色卡驱动。
+ */
+function decomposeTask(requirement: string, persona: string): string[] {
+  const role = inferRole(requirement, persona);
+  const dims = RADAR_DIMS.join('/');
+  return [
+    `recruiter:结构化面试（岗位=${role}）`,
+    `evaluator:六维评估（${dims}）+pass^k审计`,
+    `boss:审批拍板`,
+  ];
+}
+
+/** 由招聘需求构造 Task（含 dispatcher 动态拆解） */
 export function createTask(input: {
   taskId?: string;
   title: string;
   requirement: string;
   candidateId: string;
   candidateName: string;
+  candidatePersona?: string;
   transcript: string;
 }): ATTask {
   return {
@@ -173,7 +222,7 @@ export function createTask(input: {
     candidateId: input.candidateId,
     candidateName: input.candidateName,
     transcript: input.transcript,
-    decomposition: ['recruiter:结构化面试', 'evaluator:六维评估+pass^k审计', 'boss:审批拍板'],
+    decomposition: decomposeTask(input.requirement, input.candidatePersona ?? ''),
   };
 }
 
@@ -185,11 +234,12 @@ function stepStatus(s: LoopStep): 'ok' | 'warn' | 'blocked' {
 
 /** 把 trace 步骤映射到该阶段对应的 Skill id（经验沉淀/审批回滚已迁至 boss_review Skill） */
 function agentSkillOf(s: LoopStep): string | undefined {
-  if (s.agentName === 'recruiter') return 'agent_interview';
-  if (s.agentName === 'evaluator' && s.phase === 'tool') return 'capability_assessment';
-  if (s.agentName === 'evaluator' && s.phase === 'verify') return 'reliability_audit';
-  if (s.agentName === 'boss') return 'boss_review';
-  if (s.agentName === 'dispatcher') return 'orchestrate';
+  // 注意：LoopStep.agentName 是展示名（如「HR 招聘官」），角色判定须用 agentRole（角色 id）
+  if (s.agentRole === 'recruiter') return 'agent_interview';
+  if (s.agentRole === 'evaluator' && s.phase === 'tool') return 'capability_assessment';
+  if (s.agentRole === 'evaluator' && s.phase === 'verify') return 'reliability_audit';
+  if (s.agentRole === 'boss') return 'boss_review';
+  if (s.agentRole === 'dispatcher') return 'orchestrate';
   return undefined;
 }
 
@@ -202,6 +252,7 @@ export async function runTask(team: ATTeam, task: ATTask): Promise<ATRun> {
   const runId = `run-${task.taskId}-${Date.now()}`;
 
   // 组装 orchestrate Skill 入参并真实调用（handler 内部委托 runClosedLoop）
+  // SP-06：透传 team.sharedContext 给 Skill，作为「上下文传递」语义落点
   const orchestrateArgs = {
     requirement: task.requirement,
     candidateId: task.candidateId,
@@ -211,6 +262,7 @@ export async function runTask(team: ATTeam, task: ATTask): Promise<ATRun> {
     k: 3,
     threshold: 3.5,
     judge: demoJudge,
+    sharedContext: team.sharedContext,
   };
   const orch = await invokeSkill(team, 'orchestrate', orchestrateArgs);
   if (!orch.ok || !orch.data) {
@@ -222,12 +274,14 @@ export async function runTask(team: ATTeam, task: ATTask): Promise<ATRun> {
       status: 'failed',
       steps: [],
       result: undefined,
+      tokenEstimate: Math.round(EST_TOKEN_PER_CHAR * (task.transcript.length + task.requirement.length) * 2),
     };
   }
   const result = orch.data as ClosedLoopResult;
 
   // 演示 boss_review Skill 是真的活的：其 data 应与 result.bossDecision 一致（一致性展示，不强制断言）
-  const bossInvoke = await invokeSkill(team, 'boss_review', { evaluation: result.evaluation, bossProfile: undefined });
+  // SP-06：同样透传 sharedContext
+  const bossInvoke = await invokeSkill(team, 'boss_review', { evaluation: result.evaluation, bossProfile: undefined, sharedContext: team.sharedContext });
   void bossInvoke;
 
   const status: ATRun['status'] =
@@ -241,6 +295,9 @@ export async function runTask(team: ATTeam, task: ATTask): Promise<ATRun> {
     skill: agentSkillOf(s),
   }));
 
+  // token 估算：转录 + 需求长度，输入/输出各计一次
+  const tokenEstimate = Math.round(EST_TOKEN_PER_CHAR * (task.transcript.length + task.requirement.length) * 2);
+
   return {
     runId,
     teamId: team.teamId,
@@ -248,6 +305,7 @@ export async function runTask(team: ATTeam, task: ATTask): Promise<ATRun> {
     status,
     steps,
     result,
+    tokenEstimate,
   };
 }
 
