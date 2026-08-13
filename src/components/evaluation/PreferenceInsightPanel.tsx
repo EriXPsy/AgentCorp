@@ -52,7 +52,7 @@ export function PreferenceInsightPanel() {
       const base = DEFAULT_WEIGHT[d] ?? 0;
       return { dim: d, current, base, delta: current - base, lift: dimLift[d] ?? 0 };
     });
-  }, [userWeight, dimLift]);
+  }, [userWeight, preferenceProfile]);
 
   const maxW = useMemo(
     () => Math.max(...rows.map((r) => Math.max(r.current, r.base)), 0.0001),

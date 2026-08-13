@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 /**
  * Badge Component
  * Based on shadcn/ui badge

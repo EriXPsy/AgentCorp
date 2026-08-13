@@ -71,7 +71,8 @@ function LifecycleDot({ state }: { state: string }) {
 
 export function Evaluation() {
   const { t } = useTranslation('common');
-  const agents = (useAgentsStore((s) => s.agents) ?? []) as AgentSummary[];
+  const agentsRaw = useAgentsStore((s) => s.agents);
+  const agents = (agentsRaw ?? []) as AgentSummary[];
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
 
   const {
@@ -142,7 +143,7 @@ export function Evaluation() {
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedAgentId) ?? null,
-    [agents, selectedAgentId],
+    [agentsRaw, selectedAgentId],
   );
 
   /** 当前选中 agent 的评估档案（含面试基线 interviewBaseline） */

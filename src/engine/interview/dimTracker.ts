@@ -13,6 +13,9 @@ import type { CraftDim, RadarDim, RadarScore } from '@/types/evaluation';
 import type { InterviewMetrics, InterviewRecommendation, InterviewTurn } from '@/types/interview';
 import { RADAR_DIMS, CRAFT_LINKS } from '@/engine/scoring/registry';
 import { RADAR_DIM_LABELS } from '@/engine/marketplace/radarSource';
+// G1：信息增益选题——用单维 2PL IRT 把「再问一题能削减的不确定性」量化成 EIG，
+// 替代原「覆盖度升序」的贪心排序（详见 ./irt.ts）。
+import { dimInformationGain, DEFAULT_ITEM_A, DEFAULT_ITEM_B, type IrtResponse } from './irt';
 
 /** 单维证据覆盖情况 */
 export interface DimCoverage {
@@ -206,8 +209,37 @@ export function coverageRatio(coverage: DimCoverage[]): number {
 }
 
 /**
- * 追问建议：优先覆盖证据最薄弱的维度（默认至少 2 个）。
- * 已经充分覆盖（coverage ≥ 0.8）的维度不再建议。
+ * 把某维已积累的作答转成 IRT 二项作答序列（G1 信息增益选题用）。
+ * 优先用 HR 人工评分（≥3 视为达标/正确），无评分时回落到 evidenceStrength 启发式
+ * （≥0.5 视为达标）。每题采用统一默认参数（DEFAULT_ITEM_A/B），因追问探针尚无标定 a/b。
+ */
+function dimResponses(turns: InterviewTurn[], dim: RadarDim | CraftDim): IrtResponse[] {
+  const responses: IrtResponse[] = [];
+  for (const turn of turns) {
+    if (!turn.targetDims.includes(dim)) continue;
+    const rating = turn.hrRatings[dim];
+    const correct =
+      typeof rating === 'number'
+        ? rating >= 3
+        : evidenceStrength(turn.replyText) >= 0.5;
+    responses.push({ correct, a: DEFAULT_ITEM_A, b: DEFAULT_ITEM_B });
+  }
+  return responses;
+}
+
+/**
+ * 追问建议：在证据薄弱的维度里，按**期望信息增益(EIG) 降序**排序优先追问，
+ * 而非原「覆盖度升序」的贪心排序（G1）。
+ *
+ * 信息增益视角：哪维「再问一题能削减的不确定性最大」就先问哪维。
+ * - 零证据维：后验=先验（最不确定，EIG 最大）→ 自然最优先；
+ * - 已强证据维：后验集中、边际增益递减 → 自然靠后。
+ * 这比单纯「覆盖度缺口」更贴合「熵收敛」内核：体现边际信息递减，避免对
+ * 已收敛维无效追问。
+ *
+ * 已经充分覆盖（coverage ≥ 0.8）的维度不再建议——避免把已达标维以
+ * 「证据偏薄」的矛盾文案推给 HR（P2 文案修正）。
+ * 即使全部维度均已达标，也保留最薄弱的 min 个（按 EIG），保证 HR 始终有可点的追问。
  */
 export function suggestFollowups(
   turns: InterviewTurn[],
@@ -219,11 +251,20 @@ export function suggestFollowups(
   const threshold = opts.threshold ?? 0.8;
 
   const coverage = computeCoverage(turns, targetDims);
-  const weakFirst = [...coverage].sort((a, b) => (a.coverage - b.coverage) || (a.asked - b.asked));
+  // G1：全维度先按 EIG 降序（零证据→熵最大→最优先；强证据→熵低→靠后），
+  //     稳定 tie-break：EIG 相同时先问被问更少的维。
+  const allByInfoGain = [...coverage].sort((a, b) => {
+    const ga = dimInformationGain(dimResponses(turns, a.dim));
+    const gb = dimInformationGain(dimResponses(turns, b.dim));
+    if (Math.abs(ga - gb) > 1e-9) return gb - ga;
+    return a.asked - b.asked;
+  });
+  // 仅取未充分覆盖（coverage < threshold）的维作为候选追问
+  const weakByInfoGain = allByInfoGain.filter((item) => item.coverage < threshold);
 
-  const picked = weakFirst.filter((item) => item.coverage < threshold).slice(0, max);
-  // 即使全部达标，也保留最薄弱的 min 个，保证 HR 始终有可点的追问
-  const result = picked.length >= min ? picked : weakFirst.slice(0, Math.min(min, weakFirst.length));
+  const picked = weakByInfoGain.slice(0, max);
+  // 即使全部达标，也保留最薄弱的 min 个（按 EIG），保证 HR 始终有可点的追问
+  const result = picked.length >= min ? picked : allByInfoGain.slice(0, Math.min(min, allByInfoGain.length));
 
   return result.map((item) => ({
     dim: item.dim,

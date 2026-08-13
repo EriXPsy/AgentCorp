@@ -58,7 +58,12 @@ export default [
       // Base rule doesn't understand TS; defer to the TS-aware variant.
       // Kept at warn so style noise never fails the lint run outright.
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        // 代码库约定：下划线前缀（_ctx / _nodeOptions 等）= 有意未用。
+        // 一律忽略，避免对框架回调签名 / 占位变量刷 warning。
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
