@@ -296,7 +296,7 @@ MOCK=false JUDGE_BACKEND=local DEVICE=cuda MODEL_PATH=/models/<your-omni-model> 
 
 产品有两种形态：本地桌面端（Electron，请求经主进程 Host API 转发）与
 统一环境 Web 形态（前端构建产物由 model-service 同源托管，浏览器直接使用）。
-后者面向昇腾评审机场景：
+后者面向昇腾评测机场景：
 
 ```bash
 # 在仓库根目录执行（build context 需要前端源码）
@@ -309,7 +309,7 @@ docker compose -f model-service/docker-compose.ascend.yml up --build
   （含 SPA 路由回退与 `/api/evaluate/run` 别名）；基座镜像可经
   `ASCEND_BASE_IMAGE` 覆盖（FlagOS 运行时镜像就绪后同参切换）。
 - 默认 `MOCK=false` + NPU 设备透传（`/dev/davinci0`、`/dev/davinci_manager`）；
-  端口只绑宿主回环，评审机之外访问改为 `"8000:8000"` 并自行加前置鉴权。
+  端口只绑宿主回环，评测机之外访问改为 `"8000:8000"` 并自行加前置鉴权。
 - 部署后验证：`./scripts/e2e_ascend.sh`（/health 断言 → SSE 冒烟 → 测试套件）。
 - 完整部署 runbook、任务拆解与风险登记见 `docs/ascend-adaptation-plan.md`。
 

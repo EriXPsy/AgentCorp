@@ -1,9 +1,9 @@
 # AgentCorp 昇腾适配方案
 
-> 华为昇腾挑战赛 · 赛道二（创新应用赛道）工程基础设计
+> 统一异构算力环境适配 · 工程基础设计（以昇腾 NPU 为例）
 > 模型：MiniCPM-o 4.5（全模态，约 9B，OpenCompass 综合 77.6）
 > 版本：v0.3（落地对齐版）
-> 适用范围：统一昇腾环境复现验证 + 赛道二「可运行 Web Demo」交付
+> 适用范围：统一异构算力环境复现验证 + 单容器「可运行 Web Demo」交付
 >
 > **v0.3 修订（相对 v0.2）**：方案从纸面进入代码。已落地：`model_loader.resolve_device()`（NPU > CUDA > CPU 自动探测）、`ASCEND_BACKEND`（flag_gems / torch_npu 双后端）、GGUF/llama.cpp 端侧路径、compose 设备透传段。本次新增：`Dockerfile.ascend`（多阶段：Web 构建 + CANN 底座 + FlagOS 运行时层）、`docker-compose.ascend.yml`、serve.py 的 `WEB_ROOT` 前端静态托管（SPA fallback）、`/api/evaluate/run` 路径别名、`scripts/e2e_ascend.sh` 端到端验证。同时对齐安全收口后的默认值：`API_HOST` 默认回环、CORS 白名单制（容器内由环境变量显式放开）。
 >
@@ -13,19 +13,19 @@
 
 ## 1. 目标与范围
 
-**目标**：让 AgentCorp 的「全模态 HR 总监」评委模型 MiniCPM-o 4.5 在官方统一昇腾环境中跑通真实多模态推理，并以**单容器可运行 Web Demo** 形态交付赛道二。
+**目标**：让 AgentCorp 的「全模态 HR 总监」评委模型 MiniCPM-o 4.5 在统一昇腾环境中跑通真实多模态推理，并以**单容器可运行 Web Demo** 形态对外交付。
 
 **范围边界（明确不做什么）**：
 
 | 项 | 纳入范围 | 排除范围 |
 |----|---------|---------|
 | 真实推理 | ✅ model-service 接入 MiniCPM-o 真实推理（视频/语音/图像/代码/文本） | ✗ 模型本身训练/微调 |
-| Demo 形态 | ✅ 统一环境下可访问的 Web Demo（浏览器打开即用） | ✗ Electron 桌面 App 作为赛道二正式提交形态 |
+| Demo 形态 | ✅ 统一环境下可访问的 Web Demo（浏览器打开即用） | ✗ Electron 桌面 App 作为正式交付形态 |
 | 前端 | ✅ 复用现有 React 评估页（六维雷达/语音讲解/证据留痕） | ✗ 重写前端 UI |
 | 后端 | ✅ model-service（FastAPI + SSE）承载真实推理 | ✗ 新增独立网关/微服务 |
 | 提交材料 | ✅ Web Demo + 开源仓库 + PPT + 项目说明 + 演示视频 | ✗ 商业部署/高并发生产化 |
 
-**交付判定（赛道二评审可映射到）**：应用完整度、交互体验、模型能力展示（四模态交叉验证）、场景价值（HR 筛选）、工程质量、演示质量、复现可行性。
+**交付判定（可映射到通用评估维度）**：应用完整度、交互体验、模型能力展示（四模态交叉验证）、场景价值（HR 筛选）、工程质量、演示质量、复现可行性。
 
 ---
 
@@ -87,7 +87,7 @@ def load_minicpmo(model_path: str) -> MiniCPMModel:
 | 1 | 注册登录 HiDevLab 平台 | 华为开发者账号 |
 | 2 | 进入「体验 IDE」 | 在线开发/调试 |
 | 3 | 创建环境 | 选择 Ascend 算力规格（建议 910B/910A，权重需 910B/910A，见 §4.1） |
-| 4 | 申请权限 | **备注「参加面壁昇腾大赛」**，审核 1–3 工作日 |
+| 4 | 申请权限 | 审核 1–3 工作日 |
 | 5 | 拉取统一环境 | ✅ **已申请到**：基础镜像 `CANN` 9.1.0-beta.1（devel），见 §3.2 |
 
 > **已确认环境规格（HiDevLab 分配）**：镜像 `quay.io/ascend/cann:9.1.0-beta.1`（devel 版），包含 CANN Toolkit、Python 3.12 与 Ascend C 算子开发基础依赖；OS 为 Ubuntu 22.04；包管理 apt。该镜像提供「驱动 / 算子编译底座」，**不含 AI 推理运行时（torch / torch_npu / flag_gems / transformers）**，运行时需在其上叠加（见 §3.2–3.3）。
@@ -203,7 +203,7 @@ devices:
 
 现有前端是 **Electron 桌面壳**（`package.json` 含 `electron` / `electron-builder` / `vite-plugin-electron`），在统一昇腾环境（Linux 容器/服务器，无 GUI/显示服务、未必有 pnpm/lockfile）**无法直接作为可运行 Demo 启动**。
 
-### 5.2 决策：赛道二 Demo 以「单容器 Web Demo」承载
+### 5.2 决策：Demo 以「单容器 Web Demo」承载
 
 **方案：model-service 容器内同时托管前端静态资源（FastAPI `StaticFiles`），浏览器访问同一端口（8000）即用。**
 
@@ -227,7 +227,7 @@ devices:
 - ✅ SPA history fallback：`SPAStaticFiles`（StaticFiles 子类，404 回退 `index.html`）。
 - ✅ 同源零配置：前端在纯 Web 模式把 API base 解析为 `window.location.origin`（`src/lib/host-api.ts` 的 `resolveHostApiBase()`），SSE 流在无真实 Electron IPC 时直连同源——**容器里 evaluate 能打到真实模型**，而非回退离线 Mock。
 - ✅ 路径拼写对齐：model-service 增加 `POST /api/evaluate/run` 别名（与 Host API 拼写一致），Web Demo 直连时前端零改动。
-- **Electron 仍用于本地开发/桌面演示**，但赛道二提交以 Web Demo 为准；README 增加「Web Demo（统一环境）」与「Electron（本地）」双形态说明。
+- **Electron 仍用于本地开发/桌面演示**，但正式提交以 Web Demo 为准；README 增加「Web Demo（统一环境）」与「Electron（本地）」双形态说明。
 
 ### 5.4 前端在统一环境下的取舍与待补
 
@@ -291,7 +291,7 @@ CMD ["python3.11", "-m", "app.serve"]   # ★ 用运行时层解释器（非系�
 # ① 克隆仓库
 git clone <repo-url> agentcorp && cd agentcorp
 
-# ② 已申请 HiDevLab 统一昇腾环境（CANN 9.1.0-beta.1 devel，备注「参加面壁昇腾大赛」）；
+# ② 已申请 HiDevLab 统一昇腾环境（CANN 9.1.0-beta.1 devel）；
 #    需等待实际 NPU 算力分配（确认 910B/910A 规格与 /dev/davinciN 设备号）—— 见 §9.1
 
 # ③ 构建镜像（基础 = CANN 9.1.0 devel + FlagOS 运行时层 + Web 构建阶段，见 §6）
@@ -309,7 +309,7 @@ MODEL_PATH=/models/MiniCPM-o-4.5 docker compose -f docker-compose.ascend.yml up 
 
 # ⑥ 前端访问（同一端口 8000）
 #   浏览器打开 http://<npu-host>:8000  →  Web Demo（六维雷达/语音讲解/证据留痕）
-#   端口默认只绑本机回环；评审机之外访问需把 compose 端口映射改为 "8000:8000"
+#   端口默认只绑本机回环；评测机之外访问需把 compose 端口映射改为 "8000:8000"
 
 # ⑦ 端到端验证（/health + 真实评估闭环 + 离线契约回归）
 bash scripts/e2e_ascend.sh
@@ -389,13 +389,13 @@ graph TD
 
 ---
 
-## 10. 与赛道二提交材料对齐清单
+## 10. 交付材料对齐清单
 
 | 提交材料 | 状态 | 说明 / 待补 |
 |---------|------|------------|
 | 开源仓库 | 🟡 已具备骨架，待补适配 | 现有仓库结构完整；补齐 T1–T5 后即为可复现仓库 |
 | 可运行 Demo / Web Demo | 🟡 形态已定（单容器 Web Demo），待实现 | T4+T5 完成后 `docker compose up` 即出 Web Demo |
-| App | 🟡 Electron 本地版已存在 | 赛道二以 Web Demo 为准；Electron 保留作本地演示 |
+| App | 🟡 Electron 本地版已存在 | 正式以 Web Demo 为准；Electron 保留作本地演示 |
 | PPT | 🔴 待补 | 基于本方案 + 演示脚本（`docs/demo-script-A.md`）制作 |
 | 项目说明 | 🟡 README 已含昇腾部署章节，待更新 | 补「Web Demo 形态」「复现步骤（§7）」「评分维度映射」 |
 | 演示视频 | 🔴 待补 | T6 验证通过后录制真实评估闭环（§7 ⑥⑦） |
