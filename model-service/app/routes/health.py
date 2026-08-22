@@ -28,10 +28,11 @@ def health() -> dict:
 
 @router.get("/api/registry/status")
 def registry_status() -> dict:
-    """JudgeRegistry 状态：已注册 Evaluator + 运行遥测。"""
+    """JudgeRegistry 状态：已注册 Evaluator + 运行遥测 + 健康聚合。"""
     from ..scoring.judge_registry import get_registry
     reg = get_registry()
     return {
         "evaluators": reg.list_ids(),
         "stats": reg.stats(),
+        "health": reg.health(),
     }

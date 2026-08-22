@@ -19,7 +19,7 @@ Tier 2（主观评判层）评分模块的统一契约。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Literal, Optional, Protocol, runtime_checkable
 
 
 @dataclass
@@ -48,6 +48,20 @@ class EvaluatorOutput:
     confidence: float = 0.0
     reasoning: str = ""                      # 思维链（供审计）
     metadata: Dict[str, Any] = field(default_factory=dict)        # 扩展字段
+    #: 降级标记：Evaluator 无法产出真实分数（如 judge 后端不可用）但仍返回部分证据时为 True。
+    #: 消费者据此展示「机器验证通过 / LLM 评分不可用」而非当作完整评测。
+    degraded: bool = False
+    degraded_reason: str = ""
+
+
+@dataclass
+class EvaluatorHealth:
+    """单个 Evaluator 的健康状态（供注册表聚合 + /api/registry/status 展示）。"""
+
+    evaluator_id: str
+    #: healthy=可正常评分；degraded=能跑但能力受限；unavailable=依赖故障无法评分
+    status: Literal["healthy", "degraded", "unavailable"] = "healthy"
+    reason: str = ""
 
 
 @runtime_checkable
@@ -58,6 +72,8 @@ class Evaluator(Protocol):
       evaluator_id:      全局唯一注册名
       applicable_jobs:   适用的工种列表（如 ["code"]）
       evaluate(inp):     把 EvaluatorInput 转为 EvaluatorOutput
+    可选：
+      health():          自报健康状态（默认 healthy）
     """
 
     evaluator_id: str
