@@ -27,7 +27,7 @@ export default defineConfig({
   test: {
     // .tsx 测试用文件级 `// @vitest-environment jsdom` 覆盖；其余 .ts 走 node
     environment: 'node',
-    include: ['tests/unit/**/*.test.ts?(x)'],
+    include: ['tests/unit/**/*.test.ts?(x)', 'tests/contract/**/*.test.ts?(x)'],
     // scripts/qa/*.test.ts are plain Node assertion scripts (no describe/it);
     // they must not be picked up by Vitest.
     exclude: ['scripts/qa/**', 'node_modules/**'],
