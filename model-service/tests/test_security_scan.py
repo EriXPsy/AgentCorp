@@ -119,3 +119,105 @@ def test_evidence_text_is_human_checkable():
     result = scan_source_ast("x = eval(s)\n")
     text = result.evidence_text()
     assert "静态扫描" in text and "高危" in text and "L1" in text
+
+
+# ----------------------------------------------------------------------
+# 新增规则：每条至少一个正例（检出）+ 一个反例（不误报）
+# ----------------------------------------------------------------------
+def test_direct_socket_import_is_medium():
+    assert "direct-socket" in rules("import socket\ns = socket.socket()\n")
+    # from socket import ... 同样算裸 socket 使用
+    assert "direct-socket" in rules("from socket import socket, AF_INET\n")
+    # 不碰 socket 就不该报
+    assert "direct-socket" not in rules("import sockets\n")  # 别的模块
+    assert "direct-socket" not in rules("def add(a, b):\n    return a + b\n")
+
+
+def test_weak_hash_md5_and_sha1_are_medium():
+    assert "weak-hash:md5" in rules("import hashlib\nhashlib.md5(data)\n")
+    assert "weak-hash:sha1" in rules("import hashlib\nhashlib.sha1(data)\n")
+    # 强哈希不误报
+    assert "weak-hash:sha1" not in rules("import hashlib\nhashlib.sha256(data)\n")
+    assert "weak-hash:md5" not in rules("import hashlib\nhashlib.sha256(data)\n")
+    # hashlib 仅导入、未调用弱哈希，不误报
+    assert "weak-hash:md5" not in rules("import hashlib\nx = hashlib.sha256\n")
+
+
+def test_file_write_variable_path_is_medium():
+    assert "file-write-variable-path" in rules("open(user_path, 'w')\n")
+    assert "file-write-variable-path" in rules("open(user_path, 'a')\n")
+    # 常量路径写文件没有穿越风险，不误报
+    assert "file-write-variable-path" not in rules("open('/tmp/out.txt', 'w')\n")
+    # 只读模式即便路径是变量也不报
+    assert "file-write-variable-path" not in rules("open(user_path, 'r')\n")
+
+
+def test_ffi_usage_is_high():
+    assert "ffi-usage" in rules("import ctypes\n")
+    assert "ffi-usage" in rules("import cffi\n")
+    assert "ffi-usage" in rules("from ctypes import cdll\n")
+    # 普通模块不误报
+    assert "ffi-usage" not in rules("import math\n")
+
+
+def test_assert_on_tuple_is_high():
+    # 非空元组恒真，assert 永不触发
+    result = scan_source_ast("def f(a, b):\n    assert (a, b)\n")
+    assert "assert-on-tuple" in {f.rule for f in result.findings}
+    assert result.high >= 1
+    # 正常断言不误报（括号只是分组，不是元组）
+    assert "assert-on-tuple" not in rules("assert (a > 0)\n")
+    assert "assert-on-tuple" not in rules("assert x is not None\n")
+
+
+def test_bare_except_continued_is_low():
+    src = "for i in items:\n    try:\n        f(i)\n    except Exception:\n        continue\n"
+    result = scan_source_ast(src)
+    assert "bare-except-continued" in {f.rule for f in result.findings}
+    assert result.high == 0  # 仍是 low
+    # return 版本同理
+    assert "bare-except-continued" in rules(
+        "def g():\n    try:\n        f()\n    except Exception:\n        return\n"
+    )
+    # except: pass 走 silent-except，不被重复判为 bare-except-continued
+    assert "bare-except-continued" not in rules("try:\n    f()\nexcept Exception:\n    pass\n")
+    # 带日志的 except 不误报（这里用显式 pass + 注释外的语句，只要不是单跳转就不报）
+    assert "bare-except-continued" not in rules(
+        "try:\n    f()\nexcept Exception:\n    logger.error('x')\n"
+    )
+
+
+def test_rule_count_matches_declared_rules():
+    """规则表新增后，RULE_COUNT 必须与实际规则块数一致（证据文本可核对）。"""
+    from app.sandbox.security_scan import RULE_COUNT
+
+    # 每条新规则至少触发一次，确保 rules_checked 里都数到了
+    src = (
+        "import socket\n"
+        "import ctypes\n"
+        "import hashlib\n"
+        "def f(a, b):\n"
+        "    assert (a, b)\n"
+        "    open(p, 'w')\n"
+        "    hashlib.md5(b'')\n"
+        "    hashlib.sha1(b'')\n"
+        "for i in x:\n"
+        "    try:\n"
+        "        pass\n"
+        "    except Exception:\n"
+        "        continue\n"
+    )
+    result = scan_source_ast(src)
+    assert result.outcome == "scanned"
+    assert result.rules_checked == RULE_COUNT
+    # 新规则名都应出现
+    got = {f.rule for f in result.findings}
+    assert {
+        "direct-socket",
+        "ffi-usage",
+        "weak-hash:md5",
+        "weak-hash:sha1",
+        "file-write-variable-path",
+        "assert-on-tuple",
+        "bare-except-continued",
+    } <= got

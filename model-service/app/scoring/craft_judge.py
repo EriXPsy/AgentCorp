@@ -14,6 +14,17 @@ model-service/app/scoring/craft_judge.py
    绝不用其他维度的分数外推。
 4. 温度 0 + 固定题面 —— 保证效果可验证、结论可复现。
 
+学术依据：
+- Rulers: From Rubrics to Reliable Scores（arXiv:2601.08654）提出把人类 rubric
+  转成稳定可审计评分的三阶段框架：① 锁定任务级 rubric（防执行漂移）② 清单式逐条
+  判定 + 证据类型标注 + 逐字引文校验（闭合「不可核验打分」）③ 事后校准对齐人类分。
+  本模块的「逐 checkpoint hit+quote」「无 quote 即降 miss」「参考答案锚定天花板」
+  分别对应其阶段 ② 的引文校验与阶段 ③ 的锚定校准。
+- LLM-Rubric（arXiv:2501.00274）：多维校准融合多评委分布，较未校准基线 RMS
+  误差减半。本模块目前为单评委温度 0；多评委校准时可接入其 per-judge 融合思路。
+- Craft 证据与机器验证解耦（stage_scorer Q6）：裁判引文 craft_evidence 不具备
+  解除降权资格，只有机器 verified_evidence 可解除——避免「被监管方自证合格」。
+
 零新增依赖。推理走 judge_backend，不可用时抛 JudgeUnavailable 由调用方降级。
 """
 from __future__ import annotations
@@ -25,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from ..judge_backend import JudgeCompletion, JudgeUnavailable, get_backend
+from .evaluator_protocol import EvaluatorInput, EvaluatorOutput
 from .craft_tasks import CraftTask, get_reference, get_task
 from .registry import JOB_CRAFT_DIMS
 
@@ -62,6 +74,9 @@ class CraftJudgement:
     ttft_ms: Optional[float] = None
     latency_ms: float = 0.0
     backend: str = ""
+    #: 裁判思维链（chain-of-thought）：思考模型的推理全程（可能为空串）。
+    #: 供 metaJudge 做「reasoning 是否与结论一致」的一致性审计，与最终分数一并展示。
+    reasoning: str = ""
 
 
 SYSTEM_PROMPT = """你是 AgentCorp 的工种能力裁判，由 MiniCPM-o 4.5 驱动。
@@ -231,6 +246,7 @@ def judge_craft_task(task_id: str, answer: str) -> CraftJudgement:
     result.ttft_ms = completion.ttft_ms
     result.latency_ms = completion.latency_ms
     result.backend = completion.backend
+    result.reasoning = completion.reasoning
     return result
 
 
@@ -257,3 +273,57 @@ def aggregate_craft_dims(
     }
     unscored = [d for d in JOB_CRAFT_DIMS.get(job_type, []) if d not in dims]
     return dims, unscored
+
+
+# ======================================================================
+# Evaluator 契约适配 —— craft_judge 作为 JudgeRegistry 注册成员
+# ======================================================================
+
+
+class CraftJudgeEvaluator:
+    """craft 试做题的 LLM-as-judge 评分，受 JudgeRegistry 统一派发约束。
+
+    只评单题（task_id + answer）。多题聚合由调用方自行循环后 aggregate。
+    """
+
+    evaluator_id = "craft_judge"
+    applicable_jobs = ["code", "text", "image"]
+    # 产出维度 = 全部工种 craft 维的并集（每道题只用 target_dims 子集）
+    declared_dims = sorted({d for dims in JOB_CRAFT_DIMS.values() for d in dims})
+
+    def evaluate(self, inp: EvaluatorInput) -> EvaluatorOutput:
+        if not inp.task_id:
+            raise ValueError("craft_judge.evaluate 需要 task_id")
+        if not inp.answer:
+            return EvaluatorOutput(
+                evaluator_id=self.evaluator_id,
+                scores={},
+                confidence=0.0,
+                reasoning="候选未作答",
+            )
+        try:
+            j = judge_craft_task(inp.task_id, inp.answer)
+        except JudgeUnavailable:
+            raise  # 向上抛，让 Registry 调用方决定降级策略
+        # craft_evidence = 有 quote 的 checkpoint（供审计，非 machine-verified）
+        craft_ev = {
+            f"cp{i}": v.quote
+            for i, v in enumerate(j.checkpoints)
+            if v.quote
+        }
+        return EvaluatorOutput(
+            evaluator_id=self.evaluator_id,
+            scores=dict(j.dims),
+            craft_evidence=craft_ev,
+            confidence=j.confidence,
+            reasoning=j.reasoning,
+            metadata={
+                "jobType": j.job_type,
+                "unscoredDims": j.unscored_dims,
+                "paddingDetected": j.padding_detected,
+                "paddingNote": j.padding_note,
+                "referenceUsed": j.reference_used,
+                "backend": j.backend,
+                "latencyMs": j.latency_ms,
+            },
+        )

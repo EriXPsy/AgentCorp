@@ -66,6 +66,12 @@ export interface PassKResult {
   dimPassRate: Record<RadarDim, number>;
   /** 有效样本数（= k） */
   sampleCount: number;
+  /**
+   * 本次 k 次裁判采样收集到的思维链（k 段非空推理拼接；无推理时 null）。
+   * 仅加法：供评估页人工抽检时把「当前裁判响应的推理」透传给 metaJudge，
+   * 做推理-结论一致性审计。来自 judgeChatEnsemble.reasoning（后端 /api/chat-judge 透传）。
+   */
+  reasoning?: string | null;
 }
 
 /** 全零六维（空样本/判空用） */

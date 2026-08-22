@@ -130,7 +130,17 @@ _SUBPROCESS_FUNCS = {"run", "call", "check_call", "check_output", "Popen"}
 _SECRET_NAMES = ("password", "passwd", "secret", "token", "api_key", "apikey", "access_key")
 
 #: 规则总数（写进证据文本，让「扫了多少」这件事本身可核对）
-RULE_COUNT = len(_DANGEROUS_CALLS) + len(_DANGEROUS_ATTR_CALLS) + 5
+#: +5 = subprocess-shell-true / tls-verify-disabled / path-join-unnormalized
+#:       / hardcoded-secret / silent-except
+#: +7 = direct-socket / weak-hash:md5 / weak-hash:sha1 / file-write-variable-path
+#:       / ffi-usage / assert-on-tuple / bare-except-continued
+#: 计数口径与 dict 一致：按「独立 rule 名」逐个计（故 weak-hash 的 md5/sha1 各算一条）。
+RULE_COUNT = (
+    len(_DANGEROUS_CALLS)
+    + len(_DANGEROUS_ATTR_CALLS)
+    + 5  # subprocess / tls / pathjoin / secret / silent
+    + 7  # socket / weak-hash-md5 / weak-hash-sha1 / file-write / ffi / assert-tuple / bare-except
+)
 
 
 def _attr_path(node: ast.AST) -> str:
@@ -205,6 +215,38 @@ class _Visitor(ast.NodeVisitor):
                     "os.path.join 拼接变量路径，未见 normpath/realpath 校验时存在路径穿越风险",
                 )
 
+        # 8) 弱哈希（md5/sha1）用于安全校验：抗碰撞/原像攻击不足
+        if path in ("hashlib.md5", "hashlib.sha1"):
+            algo = path.split(".")[-1]
+            self._add(
+                f"weak-hash:{algo}",
+                "medium",
+                node,
+                f"hashlib.{algo} 属于弱哈希，勿用于密码/完整性等安全校验（应改用 sha256/blake2 等）",
+            )
+
+        # 9) 以变量路径写文件：open(var, "w"/"a") 路径不可控时存在路径穿越/越权写
+        #    注意 open 是内置函数，调用形态是裸 Name（_attr_path 对其返回空串），
+        #    所以要单独判断 func 是否为 Name("open")。
+        is_open_call = path == "open" or (
+            isinstance(node.func, ast.Name) and node.func.id == "open"
+        )
+        if is_open_call and len(node.args) >= 2:
+            target = node.args[0]
+            mode_arg = node.args[1]
+            is_write = (
+                isinstance(mode_arg, ast.Constant)
+                and isinstance(mode_arg.value, str)
+                and any(ch in mode_arg.value for ch in ("w", "a"))
+            )
+            if is_write and not isinstance(target, ast.Constant):
+                self._add(
+                    "file-write-variable-path",
+                    "medium",
+                    node,
+                    "open(变量路径, 'w'/'a') 写文件，路径未做白名单/normpath 校验时存在越权写风险",
+                )
+
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
@@ -235,6 +277,68 @@ class _Visitor(ast.NodeVisitor):
                     handler,
                     "except: pass 静默吞异常，故障与安全事件都会被隐藏",
                 )
+
+            # 13) 静默吞异常（续）：except 后直接 continue/return 且无日志，
+            #     同样把安全事件咽下去。这里只抓「单语句 + 跳转」的最赤裸形态，
+            #     带日志/上报的写法不报（避免误伤）。
+            if len(body) == 1 and isinstance(body[0], (ast.Continue, ast.Return)):
+                self._add(
+                    "bare-except-continued",
+                    "low",
+                    handler,
+                    "except 后直接 continue/return 且无日志，安全事件被静默吞掉",
+                )
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        # 10) 裸 socket：网络场景下直接 import socket 多为危险信号
+        for alias in node.names:
+            if alias.name == "socket":
+                self._add(
+                    "direct-socket",
+                    "medium",
+                    node,
+                    "直接 import socket 暴露裸套接字，网络场景需确认用途可信",
+                )
+
+        # 12) 外部函数接口：ctypes/cffi 可绕过 Python 安全模型
+        for alias in node.names:
+            if alias.name in ("ctypes", "cffi", "_ctypes"):
+                self._add(
+                    "ffi-usage",
+                    "high",
+                    node,
+                    f"import {alias.name} 使用外部函数接口，可绕过 Python 安全模型",
+                )
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        # 10b) from socket import ... 同样视为裸 socket 使用
+        if node.module == "socket":
+            self._add(
+                "direct-socket",
+                "medium",
+                node,
+                "from socket import ... 使用裸套接字，网络场景需确认用途可信",
+            )
+        if node.module in ("ctypes", "cffi", "_ctypes"):
+            self._add(
+                "ffi-usage",
+                "high",
+                node,
+                f"from {node.module} import ... 使用外部函数接口，可绕过 Python 安全模型",
+            )
+        self.generic_visit(node)
+
+    def visit_Assert(self, node: ast.Assert) -> None:  # noqa: N802
+        # 11) assert (a, b)：非空元组恒真，assert 永不触发，是经典 bug
+        if isinstance(node.test, ast.Tuple):
+            self._add(
+                "assert-on-tuple",
+                "high",
+                node,
+                "assert 的条件是非空元组，恒为真，断言永不触发",
+            )
         self.generic_visit(node)
 
 

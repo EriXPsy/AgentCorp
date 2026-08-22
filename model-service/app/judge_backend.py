@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -29,6 +30,30 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from .config import settings
 
 logger = logging.getLogger("judge_backend")
+
+#: 思考段标签（Qwen3 系 / MiniCPM-o 思考模式在 content 内联 <think>...</think>）。
+#: 局部后端无法拿到 message.reasoning_content 这类结构化字段时，靠此兜底抽取。
+_THINK_BLOCK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def split_thinking(text: str) -> tuple[str, str]:
+    """
+    把「思考段 + 正文」拆成 (content, reasoning)。
+
+    思考模型（Qwen3 系、MiniCPM-o 思考模式）常把推理写进 <think>...</think>，
+    正文（严格 JSON 等）在其后。下游 _extract_json 只认第一段 {...}，
+    思考段在前时会干扰 brace 定位，故在此先行剥离并单独保留 reasoning，
+    供 metaJudge 做「推理是否与结论一致」的一致性审计（见 JudgeCompletion.reasoning）。
+
+    无思考段时 reasoning 为空串、content 原样返回（剥离后 strip）。
+    """
+    raw = text or ""
+    match = _THINK_BLOCK_RE.search(raw)
+    if not match:
+        return raw.strip(), ""
+    reasoning = match.group(1).strip()
+    content = _THINK_BLOCK_RE.sub("", raw, count=1).strip()
+    return content, reasoning
 
 
 class JudgeUnavailable(RuntimeError):
@@ -48,6 +73,10 @@ class JudgeCompletion:
     latency_ms: float = 0.0
     #  上游返回的 token 用量（有则透传，供成本维使用）
     usage: Dict[str, Any] = field(default_factory=dict)
+    # 模型思维链（chain-of-thought）：记录裁判「怎么想的」全程，供 UI 展示推理过程、
+    # 供 metaJudge 做「reasoning 是否与结论一致」的一致性审计。HTTP 端点为
+    # message.reasoning_content；本地后端需 enable_thinking=True 才会产出；未启用时为空串。
+    reasoning: str = ""
 
 
 @runtime_checkable
@@ -145,7 +174,11 @@ class HttpJudgeBackend:
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         try:
             data = json.loads(raw)
-            text = data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            text = message["content"]
+            # 思维链：OpenAI 兼容端（vLLM / DeepSeek / Qwen 思考模式）在
+            # message.reasoning_content 给出 CoT。为空/缺失时规范为空串。
+            reasoning = message.get("reasoning_content") or ""
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
             raise JudgeUnavailable(f"judge 响应结构异常：{exc}") from exc
 
@@ -156,6 +189,7 @@ class HttpJudgeBackend:
             ttft_ms=elapsed_ms,
             latency_ms=elapsed_ms,
             usage=data.get("usage") or {},
+            reasoning=str(reasoning),
         )
 
 
@@ -222,7 +256,7 @@ class LocalJudgeBackend:
         temp = settings.temperature if temperature is None else temperature
         started = time.perf_counter()
         # MiniCPM-o 系列暴露 .chat(msgs=..., tokenizer=...) 接口
-        text = self._model.chat(
+        raw = self._model.chat(
             msgs=messages,
             tokenizer=self._tokenizer,
             sampling=temp > 0,
@@ -230,14 +264,18 @@ class LocalJudgeBackend:
             max_new_tokens=settings.judge_max_tokens if max_tokens is None else max_tokens,
         )
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        if isinstance(text, (list, tuple)):
-            text = text[0] if text else ""
+        if isinstance(raw, (list, tuple)):
+            raw = raw[0] if raw else ""
+        # 思考模式在内联 <think>...</think>；正文（严格 JSON）在其后。
+        # 剥离思考段并单独保留 reasoning，正文交下游 _extract_json 解析。
+        text, reasoning = split_thinking(str(raw))
         return JudgeCompletion(
-            text=str(text),
+            text=text,
             backend=self.name,
             model=self.model_path,
             ttft_ms=elapsed_ms,
             latency_ms=elapsed_ms,
+            reasoning=reasoning,
         )
 
 

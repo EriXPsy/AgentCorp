@@ -41,6 +41,8 @@ export interface HumanReviewInput {
   dim?: string | null;
   /** 裁判模型标识（跨家族轮转时可分模型诊断） */
   judgeId?: string;
+  /** 裁判给出该结论时的思维链 / 推理文本（可选，供第四种诊断：推理-结论一致性） */
+  reasoning?: string | null;
 }
 
 function loadSamples(): MetaJudgeSample[] {
@@ -81,6 +83,7 @@ export function toSample(input: HumanReviewInput, now = new Date()): MetaJudgeSa
     gold: input.agreed ? judgeSaysUsable : !judgeSaysUsable,
     confidence: input.confidence ?? null,
     dim: input.dim ?? null,
+    reasoning: input.reasoning ?? null,
     ts: now.toISOString(),
   };
 }

@@ -262,7 +262,8 @@ def test_craft_verify_endpoint_runs_real_code(monkeypatch):
     res = client.post(
         "/api/craft-verify",
         json={
-            "task_id": "code_csv_merge",
+            # 用无夹具的 task_id 走自测回退路径（code_csv_merge 现已接固定夹具）
+            "task_id": "adhoc_selftest",
             "answer": "```python\ndef add(a, b):\n    return a + b\n\n\ndef test_add():\n    assert add(1, 2) == 3\n```",
         },
     )
@@ -290,7 +291,8 @@ def test_craft_verify_no_tests_yields_no_runnability_evidence(monkeypatch):
     client = TestClient(app)
     res = client.post(
         "/api/craft-verify",
-        json={"task_id": "code_csv_merge", "answer": "```python\ndef add(a, b):\n    return a + b\n```"},
+        # 用无夹具的 task_id 走自测回退路径（code_csv_merge 现已接固定夹具）
+        json={"task_id": "adhoc_selftest", "answer": "```python\ndef add(a, b):\n    return a + b\n```"},
     )
     assert res.status_code == 200
     body = res.json()
@@ -352,3 +354,129 @@ def test_craft_verify_runs_both_evidence_chains(monkeypatch):
     assert "code_runnability" in body["verified_evidence"]
     assert "code_security" in body["verified_evidence"]
     assert "高危" in body["verified_evidence"]["code_security"]
+
+
+# ======================================================================
+# text_checks 确定性结构校验接入 craft judge（text/image 工种的机器证据链）
+# ======================================================================
+def _mock_judgement(task_id="text_rewrite_audience", job_type="text"):
+    """构造一个假 CraftJudgement，避免触发真实 LLM 裁判。"""
+    from app.scoring.craft_judge import CraftJudgement
+
+    return CraftJudgement(
+        task_id=task_id,
+        job_type=job_type,
+        dims={"txt_tone_fit": 4.0, "txt_info_density": 3.5},
+        confidence=0.8,
+        backend="mock",
+    )
+
+
+def test_text_task_verify_produces_text_evidence(monkeypatch):
+    """text 工种 + verify=True → text_checks 产出 text_structure 机器证据。"""
+    from fastapi.testclient import TestClient
+
+    from app.serve import app
+    from app.scoring import craft_judge
+
+    monkeypatch.setattr(
+        craft_judge, "judge_craft_task", lambda *a, **kw: _mock_judgement()
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/api/craft-judge",
+        json={
+            "task_id": "text_rewrite_audience",
+            "answer": (
+                "**技术负责人**：本地运行、数据不出机，接入成本低。\n"
+                "**部门主管**：不买服务器不上云，数据留自己电脑，先免费试用。\n"
+                "两版差异：A 讲技术可控性，B 讲省钱低风险。"
+            ),
+            "verify": True,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    # 确定性文本结构校验证据应出现
+    assert "text_structure" in body["verified_evidence"]
+    assert "text_structure" in body["verified_evidence"]["text_structure"].lower() or \
+           "校验" in body["verified_evidence"]["text_structure"]
+
+
+def test_text_task_verify_disabled_no_evidence(monkeypatch):
+    """verify=False → 不跑 text_checks，无机器证据。"""
+    from fastapi.testclient import TestClient
+
+    from app.serve import app
+    from app.scoring import craft_judge
+
+    monkeypatch.setattr(
+        craft_judge, "judge_craft_task", lambda *a, **kw: _mock_judgement()
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/api/craft-judge",
+        json={
+            "task_id": "text_rewrite_audience",
+            "answer": "随便写点什么。",
+            "verify": False,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["verified_evidence"] == {}
+
+
+def test_code_task_does_not_trigger_text_checks(monkeypatch):
+    """code 工种走沙箱分支，不触发 text_checks。"""
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.serve import app
+    from app.scoring import craft_judge
+
+    monkeypatch.setattr(settings, "sandbox_enabled", True, raising=False)
+    monkeypatch.setattr(
+        craft_judge, "judge_craft_task",
+        lambda *a, **kw: _mock_judgement("code_csv_merge", "code"),
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/api/craft-judge",
+        json={
+            "task_id": "code_csv_merge",
+            "answer": "```python\ndef add(a, b):\n    return a + b\n```",
+            "verify": True,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    # code 工种不产出 text_structure 证据
+    assert "text_structure" not in body["verified_evidence"]
+
+
+def test_text_spec_missing_sections_detected(monkeypatch):
+    """答案缺少要求的小节 → text_checks 报 missing-section finding。"""
+    from fastapi.testclient import TestClient
+
+    from app.serve import app
+    from app.scoring import craft_judge
+
+    monkeypatch.setattr(
+        craft_judge, "judge_craft_task", lambda *a, **kw: _mock_judgement()
+    )
+    client = TestClient(app)
+    # 答案缺少「技术负责人」和「部门主管」两个要求的小节
+    res = client.post(
+        "/api/craft-judge",
+        json={
+            "task_id": "text_rewrite_audience",
+            "answer": "随便写一段没有分节标题的文字，凑够长度。",
+            "verify": True,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    evidence = body["verified_evidence"].get("text_structure", "")
+    # 证据文本应提及异常
+    assert "异常" in evidence or "缺少" in evidence

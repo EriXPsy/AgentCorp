@@ -97,6 +97,11 @@ export interface JudgeEnsembleResult {
    * 全为温度 0 的同模型重复时，k 次输出逐字相同，pass^k 会退化为 pass^1 的复读。
    */
   realResampling?: boolean;
+  /**
+   * k 次采样各自收集到的裁判思维链（非空，去重保序）。
+   * 供 metaJudge 做「推理-结论一致性」审计；未启用思考模式时为空/缺失。
+   */
+  reasoning?: string[];
 }
 
 /** 全零六维 */
@@ -165,6 +170,7 @@ export async function judgeChatEnsemble(
   const evidence: string[] = [];
   const models: string[] = [];
   const temperatures: number[] = [];
+  const reasoning: string[] = [];
   let judgeCount = 0;
 
   for (let i = 0; i < k; i += 1) {
@@ -180,6 +186,10 @@ export async function judgeChatEnsemble(
     if (res.judgeModel && !models.includes(res.judgeModel)) models.push(res.judgeModel);
     if (typeof res.temperature === 'number') temperatures.push(res.temperature);
     if (Array.isArray(res.evidence_trace)) evidence.push(...res.evidence_trace);
+    // 收集裁判思维链（去重保序），供 metaJudge 审计推理-结论一致性
+    if (typeof res.reasoning === 'string' && res.reasoning.trim() && !reasoning.includes(res.reasoning)) {
+      reasoning.push(res.reasoning);
+    }
   }
 
   if (radars.length === 0) return null;
@@ -252,6 +262,7 @@ export async function judgeChatEnsemble(
     agreementAlpha,
     models,
     realResampling,
+    reasoning: reasoning.length > 0 ? reasoning : undefined,
   };
 }
 

@@ -78,11 +78,18 @@ def api_craft_tasks() -> list:
 
 @router.post("/api/craft-judge")
 async def api_craft_judge(req: CraftJudgeRequest) -> dict:
-    """对一道试做题评分：候选答案（A3）或 candidate 引用跑题后评分（A2）。"""
+    """对一道试做题评分：候选答案（A3）或 candidate 引用跑题后评分（A2）。
+
+    流程：
+    1. 获取答案（直接答案 或 跑候选）
+    2. 机器验证（sandbox / security scan / text checks）
+    3. LLM 裁判评分（经 JudgeRegistry 派发）
+    """
     from ..candidate_runner import CandidateRunError, run_candidate
     from ..judge_backend import JudgeUnavailable
-    from ..scoring.craft_judge import judge_craft_task
     from ..scoring.craft_tasks import get_task
+    from ..scoring.evaluator_protocol import EvaluatorInput
+    from ..scoring.judge_registry import get_registry
 
     task = get_task(req.task_id)
     if task is None:
@@ -98,33 +105,47 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
     else:
         raise HTTPException(status_code=422, detail="需提供 answer 或 candidate 引用")
 
-    # —— 真实执行验证（只对 code 工种有意义）——
-    # 与评分完全解耦：沙盒结果不喂给裁判、也不改裁判分数，
-    # 只作为 verifiedEvidence 影响 stage_scorer 的 Q6 降权。
-    # 这样「模型怎么看」与「机器怎么测」两条证据链互相独立，可交叉验证。
+    # —— 机器验证（sandbox + security scan + text checks）——
+    # 与评分完全解耦：机器证据不影响裁判分数，只作为 verifiedEvidence
+    # 影响 stage_scorer 的 Q6 降权（「没考到」≠「考过了」）。
     sandbox_payload = None
     verified_evidence: dict = {}
     scan_payload = None
+
+    # 先跑 sandbox（经 registry dispatch，自动获得遥测 + 维度校验）
     if req.verify and task.job_type == "code":
-        from ..sandbox import (
-            run_python_answer,
-            scan_python_answer,
-            security_evidence_for,
-            verified_evidence_for,
-        )
+        from ..sandbox import scan_python_answer, security_evidence_for
 
-        # 两条独立的机器证据链：执行验「能不能跑」，扫描验「有没有危险构造」。
-        # 测试全绿的代码照样可以是 eval(user_input)，所以二者不可互相替代。
-        sandbox_result = run_python_answer(answer)
-        sandbox_payload = sandbox_result.to_dict()
-        verified_evidence = verified_evidence_for(task.id, sandbox_result)
+        sandbox_out = get_registry().dispatch("sandbox", EvaluatorInput(
+            agent_id=req.task_id,  # sandbox 不需要 agent_id，用 task_id 代替
+            job_type="code",
+            task_id=task.id,
+            answer=answer,
+        ))
+        sandbox_payload = sandbox_out.metadata
+        verified_evidence = dict(sandbox_out.verified_evidence)
 
+        # 安全扫描（独立证据链：执行验「能不能跑」，扫描验「危不危险」）
         scan_result = scan_python_answer(answer)
         scan_payload = scan_result.to_dict()
         verified_evidence.update(security_evidence_for(task.id, scan_result))
 
+    elif req.verify and task.job_type in ("text", "image") and task.text_spec:
+        # 文本/多模态工种：无沙箱可跑，用确定性结构校验提供机器证据。
+        from ..sandbox.text_checks import check_text_answer, text_evidence_for
+
+        text_result = check_text_answer(answer, task.text_spec)
+        verified_evidence.update(text_evidence_for(task.id, text_result))
+
+    # —— LLM 裁判评分（经 registry dispatch）——
     try:
-        judgement = judge_craft_task(req.task_id, answer)
+        craft_out = get_registry().dispatch("craft_judge", EvaluatorInput(
+            agent_id=req.task_id,
+            job_type=task.job_type,
+            task_id=task.id,
+            answer=answer,
+            verified_evidence=verified_evidence,
+        ))
     except JudgeUnavailable as exc:
         raise HTTPException(
             status_code=503,
@@ -133,23 +154,25 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # 从 EvaluatorOutput 重建响应（保持 API 兼容）
+    j_meta = craft_out.metadata or {}
     return {
-        "task_id": judgement.task_id,
-        "job_type": judgement.job_type,
-        "dims": judgement.dims,
-        "unscored_dims": judgement.unscored_dims,
+        "task_id": req.task_id,
+        "job_type": j_meta.get("jobType", task.job_type),
+        "dims": craft_out.scores,
+        "unscored_dims": j_meta.get("unscoredDims", []),
         "checkpoints": [
-            {"checkpoint": c.checkpoint, "hit": c.hit, "quote": c.quote}
-            for c in judgement.checkpoints
+            {"checkpoint": k, "hit": True, "quote": v}
+            for k, v in craft_out.craft_evidence.items()
         ],
-        "padding_detected": judgement.padding_detected,
-        "padding_note": judgement.padding_note,
-        "confidence": judgement.confidence,
-        "reference_used": judgement.reference_used,
-        "ttft_ms": judgement.ttft_ms,
-        "latency_ms": judgement.latency_ms,
-        "backend": judgement.backend,
-        # 机器可核验证据（可为空）。空 = 未验证，下游据此继续对 requiresReal 维降权。
+        "padding_detected": j_meta.get("paddingDetected", False),
+        "padding_note": j_meta.get("paddingNote", ""),
+        "confidence": craft_out.confidence,
+        "reference_used": j_meta.get("referenceUsed", False),
+        "ttft_ms": j_meta.get("ttftMs"),
+        "latency_ms": j_meta.get("latencyMs", 0),
+        "backend": j_meta.get("backend", ""),
+        "reasoning": craft_out.reasoning,
         "verified_evidence": verified_evidence,
         "sandbox": sandbox_payload,
         "security_scan": scan_payload,
@@ -172,7 +195,7 @@ async def api_craft_verify(req: CraftVerifyRequest) -> dict:
     )
 
     task_id = req.task_id or "adhoc"
-    result = run_python_answer(req.answer)
+    result = run_python_answer(req.answer, task_id=req.task_id)
     scan = scan_python_answer(req.answer)
     evidence = verified_evidence_for(task_id, result)
     evidence.update(security_evidence_for(task_id, scan))
@@ -250,4 +273,6 @@ async def api_chat_judge(req: ChatJudgeRequest) -> dict:
         "variant": req.variant,
         "ttft_ms": completion.ttft_ms,
         "latency_ms": completion.latency_ms,
+        # 裁判思维链（供 metaJudge 一致性审计 / UI 展示推理过程）；未启用思考模式时为空串。
+        "reasoning": completion.reasoning,
     }

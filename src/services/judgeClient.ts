@@ -583,6 +583,11 @@ export interface ChatJudgeResult {
   verdict?: Verdict;
   confidence: number;
   evidence_trace: string[];
+  /**
+   * 裁判思维链 / 推理文本（后端 /api/chat-judge 透传）。
+   * 供 metaJudge 做「推理-结论一致性」审计；未启用思考模式或降级时为空串/缺失。
+   */
+  reasoning?: string;
 }
 
 /**
@@ -758,6 +763,10 @@ export async function judgeChat(
             : [],
           judgeModel: typeof json.judge_model === 'string' ? json.judge_model : undefined,
           temperature: typeof json.temperature === 'number' ? json.temperature : undefined,
+          // 裁判思维链：供 metaJudge 审计推理-结论一致性；空串/缺失时归一为 undefined
+          reasoning: typeof json.reasoning === 'string' && json.reasoning.trim()
+            ? json.reasoning
+            : undefined,
         };
       },
     );

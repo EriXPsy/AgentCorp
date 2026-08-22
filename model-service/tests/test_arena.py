@@ -19,7 +19,14 @@ import pytest  # noqa: E402
 
 from app.scoring import elo  # noqa: E402
 from app.scoring import arena_judge, arena_templates  # noqa: E402
-from app.scoring.arena_judge import build_arena_messages, objective_total, parse_arena_output  # noqa: E402
+from app.scoring.arena_judge import (  # noqa: E402
+    build_arena_messages,
+    judge_pairwise,
+    judge_pairwise_robust,
+    objective_total,
+    parse_arena_output,
+    parse_pairwise_output,
+)
 
 
 # ----------------------------------------------------------------------
@@ -399,3 +406,92 @@ def test_user_pick_422_invalid_pick(mock_judge):
         "/api/arena/user-pick", json={"matchId": match["matchId"], "pick": "zzz"}
     )
     assert resp.status_code == 422
+
+
+# ----------------------------------------------------------------------
+# 5) pairwise 鲁棒比较（位置 swap 消位置偏差）
+# ----------------------------------------------------------------------
+def test_parse_pairwise_output_normalizes_winner():
+    assert parse_pairwise_output('{"winner": "a", "confidence": 0.7}')["winner"] == "A"
+    assert parse_pairwise_output('{"winner": "b"}')["winner"] == "B"
+    assert parse_pairwise_output('{"winner": "TIE"}')["winner"] == "TIE"
+    # 脏值回退到 tie，confidence 夹到 [0,1]
+    bad = parse_pairwise_output('{"winner": "maybe", "confidence": 9}')
+    assert bad["winner"] == "TIE"
+    assert bad["confidence"] == 1.0
+
+
+def test_pairwise_robust_consistent_picks_stronger(monkeypatch):
+    """answer_a 更好：原序判 A、交换序判 B（a 在 B 位），两次映射到同一实际候选 → 一致。"""
+
+    def fake_pairwise(_req, _tp, _job, answer_a, _answer_b):
+        # 谁排在前面（answer_a 参数位）就判谁赢 → 模拟「始终判实际更强的 a」
+        return {"winner": "A", "confidence": 0.9, "reasoning": "a 更强"}
+
+    monkeypatch.setattr(arena_judge, "judge_pairwise", fake_pairwise)
+    # a 更好：fake 始终判参数位 A。r1(a,b)→A；r2(b,a)→A（b 在参数位 A）。
+    # 映射：r1 A(未swap)→first(a)；r2 A(swap)→second(b)。→ 反转 → uncertain。
+    # 所以「始终判参数位 A」其实是位置偏差。换成「判实际内容更强」的 fake：
+    def fake_by_content(_req, _tp, _job, answer_a, answer_b):
+        winner = "A" if "STRONG" in answer_a else "B"
+        return {"winner": winner, "confidence": 0.85, "reasoning": "内容更强"}
+
+    monkeypatch.setattr(arena_judge, "judge_pairwise", fake_by_content)
+    res = arena_judge.judge_pairwise_robust("需求", "题面", "code", "STRONG 方案", "普通 方案")
+    assert res["winner"] == "first"
+    assert res["consistent"] is True
+    assert res["position_bias"] is False
+    assert res["confidence"] == pytest.approx(0.85)
+
+
+def test_pairwise_robust_detects_position_bias(monkeypatch):
+    """两次都判「呈现序首位 A」→ 位置偏差，结论降级为 uncertain。"""
+
+    def always_a(_req, _tp, _job, _a, _b):
+        return {"winner": "A", "confidence": 0.9, "reasoning": ""}
+
+    monkeypatch.setattr(arena_judge, "judge_pairwise", always_a)
+    res = arena_judge.judge_pairwise_robust("需求", "题面", "code", "甲", "乙")
+    assert res["position_bias"] is True
+    assert res["winner"] == "uncertain"
+    assert res["consistent"] is False
+
+
+def test_pairwise_robust_tie(monkeypatch):
+    def always_tie(_req, _tp, _job, _a, _b):
+        return {"winner": "TIE", "confidence": 0.6, "reasoning": "相当"}
+
+    monkeypatch.setattr(arena_judge, "judge_pairwise", always_tie)
+    res = arena_judge.judge_pairwise_robust("需求", "题面", "code", "甲", "乙")
+    assert res["winner"] == "tie"
+    assert res["consistent"] is False
+
+
+def test_compare_two_candidates_populates_pairwise(mock_judge, monkeypatch):
+    """双候选 compare 应产出 pairwise 字段，winner_agent_id 映射到实际 agent。"""
+
+    def fake_pairwise(_req, _tp, _job, answer_a, _answer_b):
+        winner = "A" if "稳定" in answer_a else "B"
+        return {"winner": winner, "confidence": 0.8, "reasoning": "更贴合需求"}
+
+    monkeypatch.setattr(arena_judge, "judge_pairwise", fake_pairwise)
+    payload = _compare_payload()
+    # a1 答案含「稳定」→ 原序判 A、交换序判 B，两次映射到 a1 → 一致
+    body = _client().post("/api/arena/compare", json=payload).json()
+    assert body["pairwise"] is not None
+    # pairwise 是 dict 透传字段，键不做驼峰（与 judgement.objective_total 同口径）
+    assert body["pairwise"]["winner_agent_id"] == "a1"
+    assert body["pairwise"]["position_bias"] is False
+
+
+def test_compare_degrades_when_judge_unavailable(mock_judge, monkeypatch):
+    """judge 不可用时 pairwise 降级为 None，但对决本身仍成功（mock_judge 保绝对分）。"""
+    from app.judge_backend import JudgeUnavailable
+
+    def raise_unavailable(*_a, **_k):
+        raise JudgeUnavailable("no backend")
+
+    monkeypatch.setattr(arena_judge, "judge_pairwise_robust", raise_unavailable)
+    body = _client().post("/api/arena/compare", json=_compare_payload()).json()
+    assert body["status"] == "pending"
+    assert body["pairwise"] is None

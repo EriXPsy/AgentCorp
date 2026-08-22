@@ -156,6 +156,29 @@ export function JudgeHealthPanel() {
           </span>
         </p>
       )}
+
+      {/* 第四种诊断：推理-结论一致性（启发式，仅对有思维链的样本）。
+          只在检出矛盾时报（避免噪声）；一致时给一句低置信的安心，样本不足则静默。 */}
+      {report.reasoningConsistency.verdict === 'contradictory' && (
+        <p className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-700">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+          <span>
+            推理-结论可能脱节（启发式，低置信 ≈
+            {report.reasoningConsistency.confidence.toFixed(2)}）：
+            {report.reasoningConsistency.analyzable} 条可解析样本中有{' '}
+            {report.reasoningConsistency.vsVerdictContradictory} 条裁判思维链倾向与结论矛盾
+            （如推理在挑刺却判可用）。{report.reasoningConsistency.note}
+          </span>
+        </p>
+      )}
+      {report.reasoningConsistency.verdict === 'consistent' &&
+        report.reasoningConsistency.analyzable >= 3 && (
+          <p className="flex items-center gap-1.5 text-[11px] text-gray-500">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            推理-结论一致性（启发式，低置信）：
+            {report.reasoningConsistency.analyzable} 条带思维链样本的推理倾向与结论基本一致。
+          </p>
+        )}
       {report.overallAcceptable && report.alphaAcceptable && !overconfident && report.drift.direction !== 'degraded' && (
         <p className="flex items-center gap-1.5 text-[11px] text-emerald-600">
           <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />

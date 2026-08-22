@@ -31,6 +31,8 @@ from ..schemas import (
     ArenaUserPickRequest,
 )
 from ..scoring import arena_judge, arena_templates, elo
+from ..scoring.evaluator_protocol import EvaluatorInput
+from ..scoring.judge_registry import get_registry
 from ..scoring.registry import JOB_CRAFT_DIMS
 
 logger = logging.getLogger("serve")
@@ -146,9 +148,33 @@ async def api_arena_compare(req: ArenaCompareRequest) -> dict:
         for c in req.candidates:
             candidate_dict = c.model_dump(exclude_none=True)
             run = run_candidate(task_prompt, candidate_dict)
-            judgement = arena_judge.judge_arena_answer(
-                requirement, task_prompt, req.job_type, run.text
-            )
+            # 经 JudgeRegistry 统一派发（收口：不再直接调 arena_judge.judge_arena_answer）
+            arena_out = get_registry().dispatch("arena_judge", EvaluatorInput(
+                agent_id=c.agent_id,
+                job_type=req.job_type,
+                answer=run.text,
+                requirement=requirement,
+                options={"task_prompt": task_prompt},
+            ))
+            # 从 EvaluatorOutput 重建 judge dict（保持 API 响应兼容）
+            m = arena_out.metadata or {}
+            cp_list = [
+                {"checkpoint": k, "hit": True, "quote": v}
+                for k, v in arena_out.craft_evidence.items()
+            ]
+            judgement = {
+                "dims": dict(arena_out.scores),
+                "checkpoints": cp_list,
+                "padding_detected": m.get("paddingDetected", False),
+                "padding_note": m.get("paddingNote", ""),
+                "fit": m.get("fit", 0.0),
+                "confidence": arena_out.confidence,
+                "unscored_dims": m.get("unscoredDims", []),
+                "objective_total": m.get("objectiveTotal", 0.0),
+                "backend": m.get("backend", ""),
+                "latency_ms": m.get("latencyMs", 0.0),
+                "reasoning": arena_out.reasoning,
+            }
             answers.append(
                 ArenaCandidateAnswer(
                     agent_id=c.agent_id,
@@ -157,7 +183,7 @@ async def api_arena_compare(req: ArenaCompareRequest) -> dict:
                     channel=run.channel,
                     latency_ms=run.latency_ms,
                     judgement=judgement,
-                    objective_total=float(judgement.get("objective_total", 0.0)),
+                    objective_total=float(judgement["objective_total"]),
                 )
             )
     except CandidateRunError as exc:
@@ -171,6 +197,36 @@ async def api_arena_compare(req: ArenaCompareRequest) -> dict:
     if answers:
         objective_leader = max(answers, key=lambda a: a.objective_total).agent_id
 
+    # 双候选时跑鲁棒 pairwise（位置 swap 消位置偏差，Chatbot Arena 范式）。
+    # 纯 advisory：judge 不可用或异常都降级为 None，绝不因此让整场对决失败。
+    pairwise_result: Optional[dict] = None
+    if len(answers) == 2:
+        try:
+            raw = arena_judge.judge_pairwise_robust(
+                requirement,
+                task_prompt,
+                req.job_type,
+                answers[0].answer_text,
+                answers[1].answer_text,
+            )
+            # 把 first/second 归一成 agent_id，前端直接可用
+            winner_agent = None
+            if raw["winner"] == "first":
+                winner_agent = answers[0].agent_id
+            elif raw["winner"] == "second":
+                winner_agent = answers[1].agent_id
+            pairwise_result = {
+                "winner_agent_id": winner_agent,
+                "consistent": raw["consistent"],
+                "position_bias": raw["position_bias"],
+                "confidence": raw["confidence"],
+                "reasoning": raw["reasoning"],
+            }
+        except JudgeUnavailable:
+            logger.info("arena pairwise 降级：judge 后端不可用，仅保留绝对分")
+        except Exception as exc:  # noqa: BLE001 —— pairwise 是 advisory，故障不得冒泡
+            logger.warning("arena pairwise 异常，降级为 None：%s", exc)
+
     match = ArenaMatch(
         match_id=f"am-{uuid.uuid4().hex[:12]}",
         context=req.context,
@@ -180,6 +236,7 @@ async def api_arena_compare(req: ArenaCompareRequest) -> dict:
         job_type=req.job_type,
         candidates=answers,
         objective_leader=objective_leader,
+        pairwise=pairwise_result,
         user_pick=None,
         status="pending",
         elo_delta={},

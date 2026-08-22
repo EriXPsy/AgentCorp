@@ -172,6 +172,180 @@ def test_evaluate_unknown_candidate_fallback():
     assert any(e["type"] == "verdict" for e in events)
 
 
+# ======================================================================
+# 以下为 /api/evaluate 与 /api/evaluate-run HTTP 端点契约补测。
+# 既有用例只打到 evaluator 生成器（mode="mock"），从未经 TestClient 走 HTTP 层，
+# 因此 422 输入校验、503 judge 不可用硬拒、正常 SSE 返回结构三个分支全缺。
+# 本段补上这三块；mock 裁判走 conftest 默认 MOCK=true（不触达模型/网络）。
+# ======================================================================
+import json  # noqa: E402
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.config import settings  # noqa: E402
+from app.routes import evaluate as evaluate_routes  # noqa: E402
+from app.serve import app  # noqa: E402
+
+
+def _client() -> TestClient:
+    return TestClient(app)
+
+
+def _eval_payload(candidate_id: str = "candidate-01") -> dict:
+    """最小可用的 /api/evaluate 载荷（candidate 必填 id；preference 可空）。"""
+    return {
+        "candidate": {"id": candidate_id, "name": "琳达", "declared_budget": 180},
+        "preference": {},
+    }
+
+
+def _run_payload(agent_id: str = "agent-eval-http") -> dict:
+    """最小可用的 /api/evaluate-run 载荷（agent_id 必填，camelCase 别名）。"""
+    return {
+        "agentId": agent_id,
+        "agentName": "琳达",
+        "task": {"title": "Build dashboard", "description": "d", "weight": 1.0},
+        "transcript": "user: build a chart\nagent: done",
+        "usage": [
+            {
+                "timestamp": "2025-01-01T00:00:00Z",
+                "sessionId": "sess-1",
+                "agentId": agent_id,
+                "inputTokens": 1000,
+                "outputTokens": 500,
+                "totalTokens": 1500,
+                "costUsd": 0.0,
+            }
+        ],
+    }
+
+
+def _parse_sse(resp) -> tuple:
+    """把 TestClient.stream 响应解析为 (event_names, data_dicts)。
+
+    事件序列形如 ``event: radar_update\\ndata: {...}\\n\\n``。
+    """
+    events: list = []
+    payloads: list = []
+    for raw in resp.iter_lines():
+        line = raw if isinstance(raw, str) else raw.decode("utf-8")
+        if line.startswith("event:"):
+            events.append(line.split(":", 1)[1].strip())
+        elif line.startswith("data:"):
+            blob = line.split(":", 1)[1].strip()
+            if blob.startswith("{"):
+                payloads.append(json.loads(blob))
+    return events, payloads
+
+
+# ----------------------------------------------------------------------
+# 1) 输入校验：缺必填字段 → 422（FastAPI/Pydantic 层）
+# ----------------------------------------------------------------------
+def test_evaluate_422_missing_candidate():
+    """缺 candidate / preference → 422，而非进事件流。"""
+    resp = _client().post("/api/evaluate", json={})
+    assert resp.status_code == 422
+    # Pydantic 报错定位在 candidate 字段
+    locs = [tuple(e["loc"]) for e in resp.json()["detail"]]
+    assert any("candidate" in loc for loc in locs)
+
+
+def test_evaluate_run_422_missing_agent_id():
+    """JudgeRunRequest.agent_id 必填（camelCase agentId）；缺之 → 422。"""
+    resp = _client().post("/api/evaluate-run", json={"agentName": "无名氏"})
+    assert resp.status_code == 422
+    locs = [e["loc"] for e in resp.json()["detail"]]
+    # 别名校验字段落点与 camelCase 别名对应
+    assert any("agentId" in l or "agent_id" in l for l in locs)
+
+
+def test_evaluate_accepts_snake_case_alias():
+    """向后兼容：缺省路径时 snake_case（agent_id）亦被接受，不报 422。"""
+    body = {
+        "agent_id": "agent-snake-ok",
+        "agent_name": "蛇形",
+        "transcript": "user: hi",
+    }
+    resp = _client().post("/api/evaluate-run", json=body)
+    assert resp.status_code == 200
+
+
+# ----------------------------------------------------------------------
+# 2) judge 不可用降级：非 mock + judge_available()=False → 503 硬拒
+# ----------------------------------------------------------------------
+def test_evaluate_503_when_judge_unavailable(monkeypatch):
+    """非 mock 且 judge 不可用 → 503（不启动 SSE，文案提示 JUDGE_BACKEND/MOCK）。"""
+    monkeypatch.setattr(settings, "mock", False)
+    monkeypatch.setattr(evaluate_routes, "judge_available", lambda: False)
+
+    resp = _client().post("/api/evaluate", json=_eval_payload())
+    assert resp.status_code == 503
+    detail = resp.json().get("detail", "")
+    assert "JUDGE_BACKEND" in detail
+    assert "MOCK=true" in detail
+
+
+def test_evaluate_run_503_when_judge_unavailable(monkeypatch):
+    """/api/evaluate-run 与 /api/evaluate 同构：503 硬拒，不启动 SSE。"""
+    monkeypatch.setattr(settings, "mock", False)
+    monkeypatch.setattr(evaluate_routes, "judge_available", lambda: False)
+
+    resp = _client().post("/api/evaluate-run", json=_run_payload())
+    assert resp.status_code == 503
+    detail = resp.json().get("detail", "")
+    assert "JUDGE_BACKEND" in detail
+
+
+# ----------------------------------------------------------------------
+# 3) 正常路径返回结构（MOCK=true 走演示流，产出完整 SSE 序列）
+# ----------------------------------------------------------------------
+def test_evaluate_normal_path_sse_structure():
+    """POST /api/evaluate 正常返回：200 SSE，含 radar_update×6 + verdict + done。"""
+    # conftest 默认 MOCK=true → mock 分支放行，不触达模型；此处锁定该前提。
+    assert settings.mock is True
+
+    client = _client()
+    with client.stream("POST", "/api/evaluate", json=_eval_payload()) as resp:
+        assert resp.status_code == 200
+        events, payloads = _parse_sse(resp)
+
+    radar = [e for e in events if e == "radar_update"]
+    assert len(radar) == 6, f"六维雷达应恰好 6 个，实际 {len(radar)}"
+    assert "verdict" in events
+    assert "done" in events
+
+    # verdict 载荷结构
+    verdict_obj = next(p for p in payloads if "user_fit" in p)
+    assert verdict_obj["verdict"] in {"MVP", "OBSERVE", "FIRED"}
+    assert 0.0 <= verdict_obj["user_fit"] <= 100.0
+    assert isinstance(verdict_obj["evidence_trace"], list)
+
+    # done 载荷含 evaluation_id
+    done_obj = next(p for p in payloads if "evaluation_id" in p)
+    assert done_obj["evaluation_id"]
+
+
+def test_evaluate_run_normal_path_sse_structure():
+    """POST /api/evaluate-run 正常返回：200 SSE，含 task_run(可选) + radar×6 + verdict + done。"""
+    client = _client()
+    with client.stream("POST", "/api/evaluate-run", json=_run_payload()) as resp:
+        assert resp.status_code == 200
+        events, payloads = _parse_sse(resp)
+
+    radar = [e for e in events if e == "radar_update"]
+    assert len(radar) == 6, f"六维雷达应恰好 6 个，实际 {len(radar)}"
+    assert "verdict" in events
+    assert "done" in events
+
+    # verdict 结构
+    verdict_obj = next(p for p in payloads if "user_fit" in p)
+    assert verdict_obj["verdict"] in {"MVP", "OBSERVE", "FIRED"}
+    assert 0.0 <= verdict_obj["user_fit"] <= 100.0
+
+    done_obj = next(p for p in payloads if "evaluation_id" in p)
+    assert done_obj["evaluation_id"]
+
+
 if __name__ == "__main__":
     # 简易直接运行入口（python tests/test_evaluate.py）
     for name in dir():

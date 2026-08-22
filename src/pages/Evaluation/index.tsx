@@ -193,6 +193,9 @@ export function Evaluation() {
         agentId: selectedAgentId,
         verdict: lastVerdict,
         confidence: passKResult?.passRate ?? null,
+        // 裁判思维链：来自最近一次 pass^k 的 judgeChat 采样（后端 /api/chat-judge 透传）。
+        // 供 metaJudge 做「推理-结论一致性」审计；未跑过 pass^k 或裁判未启用思考模式时为 undefined。
+        reasoning: passKResult?.reasoning ?? undefined,
         agreed,
         dim: selectedProfile.jobType ?? null,
       });

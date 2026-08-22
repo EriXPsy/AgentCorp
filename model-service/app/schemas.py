@@ -448,6 +448,9 @@ class ArenaMatch(BaseModel):
     job_type: str = "code"
     candidates: List[ArenaCandidateAnswer] = Field(default_factory=list)
     objective_leader: Optional[str] = None
+    #: pairwise 鲁棒相对比较结果（仅双候选时产出）：winner/consistent/position_bias 等。
+    #: 由 judge_pairwise_robust 产出，用位置 swap 消位置偏差，比单一客观分更鲁棒。
+    pairwise: Optional[dict] = None
     user_pick: Optional[str] = None  # agent_id | "draw" | "none"
     status: Literal["pending", "picked", "abandoned"] = "pending"
     elo_delta: Dict[str, float] = Field(default_factory=dict)

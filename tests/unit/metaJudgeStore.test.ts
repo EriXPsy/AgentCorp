@@ -53,6 +53,32 @@ describe('toSample · 抽检语义翻译', () => {
     expect(s.confidence).toBe(0.9);
     expect(s.ts).toBeTruthy();
   });
+
+  it('推理思维链透传进样本（供第四种诊断：推理-结论一致性）', () => {
+    const s = toSample({
+      agentId: 'a',
+      verdict: 'MVP',
+      agreed: true,
+      reasoning: '候选兑现了可运行性要点，全部达标。',
+    });
+    expect(s.reasoning).toBe('候选兑现了可运行性要点，全部达标。');
+  });
+
+  it('未提供 reasoning → 样本里为 null（不影响既有语义）', () => {
+    const s = toSample({ agentId: 'a', verdict: 'MVP', agreed: true });
+    expect(s.reasoning).toBeNull();
+  });
+
+  it('recordReview 把 reasoning 一并存入样本库', () => {
+    useMetaJudgeStore.getState().recordReview({
+      agentId: 'a',
+      verdict: 'MVP',
+      agreed: true,
+      reasoning: '整体正确，满足要求。',
+    });
+    const stored = useMetaJudgeStore.getState().samples[0];
+    expect(stored?.reasoning).toBe('整体正确，满足要求。');
+  });
 });
 
 describe('端到端：抽检 → 元评估报告', () => {

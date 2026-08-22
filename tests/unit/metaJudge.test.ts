@@ -16,6 +16,7 @@ import {
   diagnoseByDim,
   driftCheck,
   assessMetaJudge,
+  reasoningPolarity,
   type MetaJudgeSample,
 } from '@/engine/evaluation/metaJudge';
 
@@ -205,5 +206,128 @@ describe('metaJudge · assessMetaJudge', () => {
     // accuracy = 0.8；默认阈值 0.67 → 可接受；调高到 0.9 → 不可接受
     expect(assessMetaJudge(samples).overallAcceptable).toBe(true);
     expect(assessMetaJudge(samples, { acceptableThreshold: 0.9 }).overallAcceptable).toBe(false);
+  });
+});
+
+describe('metaJudge · reasoningPolarity（推理文本情感极性）', () => {
+  it('负向词占优 → negative', () => {
+    expect(reasoningPolarity('该方案未跑通，存在错误，不可运行。')).toBe('negative');
+  });
+
+  it('正向词占优 → positive', () => {
+    expect(reasoningPolarity('候选兑现了要点，满足要求，结果正确。')).toBe('positive');
+  });
+
+  it('无任何倾向词 → neutral', () => {
+    expect(reasoningPolarity('这是一段没有任何倾向关键词的纯描述文本。')).toBe('neutral');
+  });
+
+  it('否定前缀不被误判为正向：「不符合」因含「符合」却应判负', () => {
+    // 关键防误判：若只做子串匹配，「不符合」会同时命中正向「符合」。
+    // 实现先挖掉负向短语再数正向，故此处必须判负。
+    expect(reasoningPolarity('该交付不符合要求，存在偏差。')).toBe('negative');
+  });
+
+  it('正负数量打平 → neutral（不强行归类）', () => {
+    // 「正确」(正) 与 「错误」(负) 各一次 → 打平 → neutral
+    expect(reasoningPolarity('整体正确但有一处错误。')).toBe('neutral');
+  });
+
+  // ── 否定前缀 + 正向词：deny-list 穷举 + 否定窗口双重覆盖 ──
+  it('「未能实现」→ negative（deny-list 命中 4 字连续负向短语）', () => {
+    expect(reasoningPolarity('候选未能实现要点，整体偏差。')).toBe('negative');
+  });
+
+  it('「未能兑现」→ negative', () => {
+    expect(reasoningPolarity('未能兑现承诺，存在错误。')).toBe('negative');
+  });
+
+  it('「不能满足」→ negative', () => {
+    expect(reasoningPolarity('不能满足需求，有缺陷。')).toBe('negative');
+  });
+
+  it('「不能达到」→ negative', () => {
+    expect(reasoningPolarity('不能达到预期，不可靠。')).toBe('negative');
+  });
+
+  it('「没完成」→ negative', () => {
+    expect(reasoningPolarity('该方案没完成核心功能，存在缺陷。')).toBe('negative');
+  });
+
+  it('「没跑通」→ negative', () => {
+    expect(reasoningPolarity('代码没跑通，有报错。')).toBe('negative');
+  });
+
+  // ── 危险逆否：「不会出现错误」语义正面，但含「错误」cue → 正确结果应为 positive ──
+  it('「不会出现错误」+ 正向上下文 → positive（危险逆否：错误 cue 不压过正向多数）', () => {
+    // 关键防误判：若简单计数，「错误」(负) 会让结果偏负。
+    // 但「准确」「通过」两个正向 cue 应压过单个「错误」，结果仍为 positive。
+    expect(reasoningPolarity('交付不会出现错误，结果准确，通过验证。')).toBe('positive');
+  });
+
+  // ── 否定窗口：deny-list 未枚举的否定前缀 + 正向词组合 ──
+  it('「未能对齐」中「对齐」被否定窗口否决（deny-list 无此 4 字条目）', () => {
+    // deny-list 有「未对齐」(3字)，不含「未能对齐」(4字)。
+    // 但「未」在「对齐」前 2 格内 → 否定窗口否决「对齐」的正向计数。
+    // 加上「偏差」(非 cue) 无正向 → neutral（无负向 cue 命中）。
+    // 注：此例意在验证窗口不产生假阳性——「未能对齐」不含明确负向 cue，
+    // 故判 neutral 而非 negative（窗口只否决正向，不创造负向计数）。
+    expect(reasoningPolarity('方案未能对齐预期。')).toBe('neutral');
+  });
+});
+
+describe('metaJudge · 推理-结论一致性诊断', () => {
+  it('推理在挑刺却判可用 → 矛盾', () => {
+    const samples = Array.from({ length: 4 }, (_, i) =>
+      sample({
+        id: `s${i}`,
+        gold: true,
+        judgeVerdict: true, // 裁判说可用
+        reasoning: '该实现未跑通，存在明显错误，不可运行，未达标。',
+      }),
+    );
+    const rc = assessMetaJudge(samples).reasoningConsistency;
+    expect(rc.verdict).toBe('contradictory');
+    expect(rc.vsVerdictContradictory).toBe(4);
+    expect(rc.contradictionRate).toBe(1);
+    // 启发式：置信度有上限，绝不假装精确
+    expect(rc.confidence).toBeGreaterThan(0);
+    expect(rc.confidence).toBeLessThanOrEqual(0.6);
+  });
+
+  it('推理与结论同向 → 一致', () => {
+    const samples = Array.from({ length: 4 }, (_, i) =>
+      sample({
+        id: `s${i}`,
+        gold: true,
+        judgeVerdict: true,
+        reasoning: '候选兑现了要点，满足要求，结果准确，全部通过。',
+      }),
+    );
+    const rc = assessMetaJudge(samples).reasoningConsistency;
+    expect(rc.verdict).toBe('consistent');
+    expect(rc.vsVerdictContradictory).toBe(0);
+    expect(rc.contradictionRate).toBe(0);
+  });
+
+  it('样本不足 → 判 insufficient，矛盾率为 null，绝不凑数', () => {
+    // 仅 1 条带推理，不足 3 条门槛
+    const samples = [
+      sample({ id: 's0', gold: true, judgeVerdict: true, reasoning: '未跑通，错误。' }),
+      sample({ id: 's1', gold: true, judgeVerdict: true }), // 无推理
+    ];
+    const rc = assessMetaJudge(samples).reasoningConsistency;
+    expect(rc.verdict).toBe('insufficient');
+    expect(rc.contradictionRate).toBeNull();
+    expect(rc.confidence).toBe(0);
+  });
+
+  it('全员无推理 → withReasoning=0，判 insufficient', () => {
+    const samples = Array.from({ length: 5 }, (_, i) =>
+      sample({ id: `s${i}`, gold: true, judgeVerdict: true }),
+    );
+    const rc = assessMetaJudge(samples).reasoningConsistency;
+    expect(rc.withReasoning).toBe(0);
+    expect(rc.verdict).toBe('insufficient');
   });
 });

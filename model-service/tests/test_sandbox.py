@@ -105,9 +105,11 @@ def test_add():
     result = run_python_answer(answer)
     assert result.outcome == "failed"
     assert (result.total, result.passed, result.failed) == (1, 0, 1)
-    # 失败同样是「已验证」的事实：关于可运行性我们确实测到了结论
+    # 失败是「已验证」的事实（verifiable），但**不抬升降权**：
+    # 若把失败也当抬权证据，等于让一段 provably 跑不过的代码免于 Q6 降权，
+    # 而 LLM 评委可能同时给它打高分——双重失真。
     assert result.verifiable is True
-    assert "code_runnability" in verified_evidence_for("t", result)
+    assert verified_evidence_for("t", result) == {}
     failed_case = next(c for c in result.cases if not c[1])
     assert "AssertionError" in failed_case[2]
 
@@ -138,6 +140,106 @@ def test_undefined_name_at_import_time_fails():
     answer = "```python\nvalue = undefined_thing()\n\ndef test_v():\n    assert value\n```"
     result = run_python_answer(answer)
     assert result.outcome == "failed"
+
+
+# ======================================================================
+# 固定夹具路径（SWE-bench 范式）：跑 curated 夹具，不跑候选自写测试
+# ======================================================================
+_GOOD_MERGE = '''
+import csv
+from datetime import datetime
+
+
+def _norm_amount(raw):
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    for ch in ("￥", "¥", "$", ","):
+        s = s.replace(ch, "")
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def merge_orders(path_a, path_b):
+    best = {}
+    for path in (path_a, path_b):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                oid = str(row.get("order_id", "")).strip()
+                if not oid:
+                    continue
+                rec = {
+                    "order_id": oid,
+                    "amount": _norm_amount(row.get("amount")),
+                    "updated_at": row.get("updated_at"),
+                }
+                old = best.get(oid)
+                old_ts = datetime.min
+                if old is not None:
+                    try:
+                        old_ts = datetime.fromisoformat(str(old.get("updated_at")).strip())
+                    except (ValueError, TypeError):
+                        old_ts = datetime.min
+                try:
+                    new_ts = datetime.fromisoformat(str(row.get("updated_at")).strip())
+                except (ValueError, TypeError):
+                    new_ts = datetime.min
+                if old is None or new_ts >= old_ts:
+                    best[oid] = rec
+    return list(best.values())
+'''
+
+
+def test_fixture_correct_solution_passes():
+    """正确实现过固定夹具 → passed，且产出可抬权的 verified_evidence。"""
+    result = run_python_answer(_GOOD_MERGE, task_id="code_csv_merge")
+    assert result.outcome == "passed"
+    assert result.total == 6
+    assert result.passed == 6
+    assert result.failed == 0
+    # 夹具全绿 → 解除 Q6 降权
+    assert "code_runnability" in verified_evidence_for("code_csv_merge", result)
+
+
+def test_fixture_wrong_solution_fails_and_lifts_nothing():
+    """金额未归一化的实现过夹具 → failed；失败是负面证据，绝不抬权。"""
+    bad = (
+        "import csv\n\n"
+        "def merge_orders(a, b):\n"
+        "    out = []\n"
+        "    for p in (a, b):\n"
+        "        with open(p, newline='', encoding='utf-8') as f:\n"
+        "            for row in csv.DictReader(f):\n"
+        "                out.append({'order_id': row['order_id'], 'amount': row.get('amount')})\n"
+        "    return out\n"
+    )
+    result = run_python_answer(bad, task_id="code_csv_merge")
+    assert result.outcome == "failed"
+    assert result.failed >= 1
+    # 失败绝不抬权——避免 provably 跑不过的代码免于 Q6 降权
+    assert verified_evidence_for("code_csv_merge", result) == {}
+
+
+def test_fixture_missing_entrypoint_is_failed():
+    """候选没定义夹具要求的入口函数 → 夹具 import 失败 → failed（契约未满足）。"""
+    no_entry = "```python\ndef unrelated():\n    return 42\n```"
+    result = run_python_answer(no_entry, task_id="code_csv_merge")
+    assert result.outcome == "failed"
+    assert verified_evidence_for("code_csv_merge", result) == {}
+
+
+def test_unknown_task_id_falls_back_to_selftest():
+    """无夹具的 task_id 回退到候选自测路径（向后兼容）。"""
+    answer = "```python\ndef f():\n    return 1\n\ndef test_f():\n    assert f() == 1\n```"
+    result = run_python_answer(answer, task_id="no_such_task")
+    assert result.outcome == "passed"
 
 
 def test_infinite_loop_is_killed_by_timeout(monkeypatch):

@@ -14,6 +14,7 @@ rubric 逐维打分——这是 HELM / Chatbot Arena / SWE-bench 一类成熟评
 - prompt        题面（直接发给候选 agent，走现有文本通道）
 - checkpoints   可核验要点（rubric 锚点，裁判据此找证据，而非凭感觉）
 - probes        反注水探针（题面里埋的隐含约束，只声明不兑现就会露出）
+- text_spec     文本结构校验规格（可选，仅 text/image 工种；传给 text_checks.check_text_answer）
 """
 from __future__ import annotations
 
@@ -37,6 +38,11 @@ class CraftTask:
     checkpoints: List[str] = field(default_factory=list)
     #: 反注水探针：题面隐含约束，答非所问或空口承诺时暴露
     probes: List[str] = field(default_factory=list)
+    #: 文本结构校验规格（可选）——传给 text_checks.check_text_answer()，
+    #: 提供确定性（无 LLM）的结构证据，与 LLM 裁判互补。
+    #: 支持的键：required_sections / min_len / max_len / json_expected
+    #: 仅 text/image 工种有意义；code 工种靠沙箱验证，不设此字段。
+    text_spec: Optional[Dict] = None
 
 
 # ======================================================================
@@ -192,6 +198,11 @@ _TEXT_TASKS: List[CraftTask] = [
             "字数超限即为指令遵循失败（题面给了硬约束）",
             "两版换词不换视角，说明未真正区分读者",
         ],
+        text_spec={
+            "required_sections": ["技术负责人", "部门主管"],
+            "min_len": 40,
+            "max_len": 600,
+        },
     ),
     CraftTask(
         id="text_factuality_guard",
@@ -212,6 +223,11 @@ _TEXT_TASKS: List[CraftTask] = [
             "直接采用原话或换个说法保留「第一」即为事实性失守",
             "只说不合规而不给替代方案，说明协作意识弱",
         ],
+        text_spec={
+            "required_sections": ["改写", "理由", "风险"],
+            "min_len": 60,
+            "max_len": 800,
+        },
     ),
     CraftTask(
         id="text_compress",
@@ -233,6 +249,11 @@ _TEXT_TASKS: List[CraftTask] = [
             "超过 40 字即失败",
             "删掉了核心信息只为凑字数，说明未理解压缩目标",
         ],
+        text_spec={
+            "required_sections": ["删除", "删掉"],
+            "min_len": 30,
+            "max_len": 500,
+        },
     ),
     CraftTask(
         id="text_boss_rewrite",
@@ -262,6 +283,11 @@ _TEXT_TASKS: List[CraftTask] = [
             "任何一版出现「最先进」「第一」等无据最高级即为事实失守",
             "三版字数不满足即指令遵循失败",
         ],
+        text_spec={
+            "required_sections": ["CTO", "社交", "教程", "失真"],
+            "min_len": 100,
+            "max_len": 800,
+        },
     ),
 ]
 

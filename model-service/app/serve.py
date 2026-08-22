@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
-from .routes import arena, convergence, evaluate, health, judge, leaderboard, samples, upload
+from .routes import arena, convergence, evaluate, growth, health, judge, leaderboard, samples, upload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +38,14 @@ logging.basicConfig(
 logger = logging.getLogger("serve")
 
 app = FastAPI(title="AgentCorp MiniCPM-o Evaluator", version="0.1.0")
+
+# JudgeRegistry 启动注册：所有 Tier 2 主观评分模块在此收口。
+# 新增 Evaluator 必须登记到 evaluators/__init__.py，否则 CI 强制失败。
+from .scoring.evaluators import register_all as _register_evaluators
+from .scoring.judge_registry import get_registry as _get_registry
+
+_register_evaluators(_get_registry())
+logger.info("JudgeRegistry: 已注册 %d 个 Evaluator", len(_get_registry().list_ids()))
 
 # CORS 收敛为本地 dev 白名单：正常调用方是 Electron 主进程的 Host API 代理
 # （server-to-server，不需要 CORS）；浏览器直连只发生在本地 web 预览。
@@ -72,6 +80,7 @@ app.include_router(upload.router)
 app.include_router(convergence.router)
 app.include_router(leaderboard.router)
 app.include_router(judge.router)
+app.include_router(growth.router)
 app.include_router(health.router)
 app.include_router(arena.router)
 

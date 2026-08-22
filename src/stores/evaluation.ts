@@ -577,6 +577,10 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
         // 标 mode='sessions'，因为 meanRadar/dimPassRate 仍是「各段均值雷达」派生的，
         // 与 allPass/passRate 的会话级语义不同，必须让 UI 能分辨（详见 PassKMode 注释）。
         const base = passK(allRadars, { k: allRadars.length });
+        // 收集各段会话裁判的思维链（供 metaJudge 推理-结论一致性审计）；无推理时为 null
+        const sessionReasoning = valid
+          .flatMap((r) => r.reasoning ?? [])
+          .filter((t) => typeof t === 'string' && t.trim().length > 0);
         const combined: PassKResult = {
           ...base,
           mode: 'sessions',
@@ -586,6 +590,7 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
             Math.round(
               (perSessionPass.filter(Boolean).length / perSessionPass.length) * 100,
             ) / 100,
+          reasoning: sessionReasoning.length > 0 ? sessionReasoning.join('\n---\n') : null,
         };
         set({ passKResult: combined, passKRunning: false });
         return;
@@ -613,7 +618,16 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
         });
         return;
       }
-      set({ passKResult: result.passK, passKRunning: false });
+      // 把 ensemble 收集到的裁判思维链一并带入 passKResult，供人工抽检时透传给 metaJudge。
+      // k 段非空推理拼接；无推理（未启用思考模式/全降级）时为 null。
+      const ensembleReasoning = (result.reasoning ?? []).filter((t) => t.trim().length > 0);
+      set({
+        passKResult: {
+          ...result.passK,
+          reasoning: ensembleReasoning.length > 0 ? ensembleReasoning.join('\n---\n') : null,
+        },
+        passKRunning: false,
+      });
     } catch (e) {
       set({ passKRunning: false, error: e instanceof Error ? e.message : String(e) });
     }
