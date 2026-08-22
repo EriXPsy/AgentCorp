@@ -157,6 +157,12 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
         verified_evidence.update(text_evidence_for(task.id, text_result))
 
     # —— LLM 裁判评分（经 registry dispatch）——
+    # 降级契约：judge 后端不可用时**不抛 503**，而是返回 200 + degraded，
+    # 把已收集的机器证据（sandbox / scan / text checks）原样透出——
+    # 机器证据是 judge 故障时唯一还能拿到的真实信号，不应被一并丢弃。
+    # 诚实：dims 留空、confidence=0，前端据此展示「机器验证通过 / LLM 评分不可用」。
+    craft_out = None
+    degraded_reason = ""
     try:
         craft_out = get_registry().dispatch("craft_judge", EvaluatorInput(
             agent_id=req.task_id,
@@ -166,12 +172,58 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
             verified_evidence=verified_evidence,
         ))
     except JudgeUnavailable as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"craft 评测后端不可用：{exc}",
-        ) from exc
+        degraded_reason = f"craft 评测后端不可用：{exc}"
+        logger.info("craft-judge 降级：%s", degraded_reason)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if craft_out is not None and not craft_out.degraded:
+        # 正常路径：完整 LLM 评分
+        j_meta = craft_out.metadata or {}
+        return {
+            "task_id": req.task_id,
+            "job_type": j_meta.get("jobType", task.job_type),
+            "dims": craft_out.scores,
+            "unscored_dims": j_meta.get("unscoredDims", []),
+            "checkpoints": [
+                {"checkpoint": k, "hit": True, "quote": v}
+                for k, v in craft_out.craft_evidence.items()
+            ],
+            "padding_detected": j_meta.get("paddingDetected", False),
+            "padding_note": j_meta.get("paddingNote", ""),
+            "confidence": craft_out.confidence,
+            "reference_used": j_meta.get("referenceUsed", False),
+            "ttft_ms": j_meta.get("ttftMs"),
+            "latency_ms": j_meta.get("latencyMs", 0),
+            "backend": j_meta.get("backend", ""),
+            "reasoning": craft_out.reasoning,
+            "verified_evidence": verified_evidence,
+            "sandbox": sandbox_payload,
+            "security_scan": scan_payload,
+        }
+
+    # 降级路径：judge 不可用，诚实返回机器证据 + 空分
+    reason = degraded_reason or (craft_out.degraded_reason if craft_out else "judge 不可用")
+    return {
+        "task_id": req.task_id,
+        "job_type": task.job_type,
+        "dims": {},
+        "unscored_dims": [],
+        "checkpoints": [],
+        "padding_detected": False,
+        "padding_note": "",
+        "confidence": 0,
+        "reference_used": False,
+        "ttft_ms": None,
+        "latency_ms": 0,
+        "backend": "",
+        "reasoning": "",
+        "degraded": True,
+        "degraded_reason": reason,
+        "verified_evidence": verified_evidence,
+        "sandbox": sandbox_payload,
+        "security_scan": scan_payload,
+    }
 
     # 从 EvaluatorOutput 重建响应（保持 API 兼容）
     j_meta = craft_out.metadata or {}

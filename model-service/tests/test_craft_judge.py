@@ -480,3 +480,87 @@ def test_text_spec_missing_sections_detected(monkeypatch):
     evidence = body["verified_evidence"].get("text_structure", "")
     # 证据文本应提及异常
     assert "异常" in evidence or "缺少" in evidence
+
+
+# ======================================================================
+# craft-judge 优雅降级：judge 后端不可用时保留机器证据，不抛 503
+# ======================================================================
+def test_craft_judge_degrades_when_judge_unavailable(monkeypatch):
+    """judge 后端不可用 → 200 + degraded=true + 机器证据 intact + 空分。
+
+    诚实性：不抛 503 丢弃已收集的机器证据，而是诚实标注「LLM 评分不可用」。
+    text 结构校验（确定性纯函数）独立于 LLM judge，仍正常产出证据。
+    """
+    from fastapi.testclient import TestClient
+
+    from app.judge_backend import JudgeUnavailable
+    from app.serve import app
+    from app.scoring import craft_judge
+
+    # 让 judge 派发失败（模拟后端不可用）
+    def _raise_unavailable(*a, **kw):
+        raise JudgeUnavailable("mock: judge backend down")
+
+    monkeypatch.setattr(craft_judge, "judge_craft_task", _raise_unavailable)
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/craft-judge",
+        json={
+            "task_id": "text_rewrite_audience",
+            "answer": (
+                "**技术负责人**：本地运行、数据不出机，接入成本低。\n"
+                "**部门主管**：不买服务器不上云，数据留自己电脑，先免费试用。\n"
+                "两版差异：A 讲技术可控性，B 讲省钱低风险。"
+            ),
+            "verify": True,
+        },
+    )
+    assert res.status_code == 200, "judge 不可用时 craft-judge 应降级为 200 而非 503"
+    body = res.json()
+    # 降级标记
+    assert body["degraded"] is True
+    assert "不可用" in body["degraded_reason"]
+    # 诚实：无 LLM 分数
+    assert body["dims"] == {}
+    assert body["confidence"] == 0
+    # 机器证据保留（text 结构校验独立于 judge）
+    assert "text_structure" in body["verified_evidence"]
+
+
+def test_craft_judge_degrades_code_keeps_sandbox_evidence(monkeypatch):
+    """code 工种 judge 不可用 → sandbox 执行证据保留。"""
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.judge_backend import JudgeUnavailable
+    from app.serve import app
+    from app.scoring import craft_judge
+
+    def _raise_unavailable(*a, **kw):
+        raise JudgeUnavailable("mock: judge backend down")
+
+    monkeypatch.setattr(craft_judge, "judge_craft_task", _raise_unavailable)
+    monkeypatch.setattr(settings, "sandbox_enabled", True, raising=False)
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/craft-judge",
+        json={
+            "task_id": "code_csv_merge",
+            "answer": (
+                "```python\n"
+                "import csv\n"
+                "def merge(a, b):\n"
+                "    return list(a) + list(b)\n"
+                "```"
+            ),
+            "verify": True,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["degraded"] is True
+    assert body["dims"] == {}
+    # sandbox 执行详情仍在
+    assert body["sandbox"] is not None

@@ -27,6 +27,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Union
 
 from .evaluator_protocol import (
     Evaluator,
+    EvaluatorHealth,
     EvaluatorInput,
     EvaluatorOutput,
     allowed_dims_for,
@@ -180,6 +181,34 @@ class JudgeRegistry:
             }
             for eid, s in self._stats.items()
         }
+
+    def health(self) -> Dict[str, Any]:
+        """聚合所有 Evaluator 的健康状态（供 /api/registry/status 展示）。
+
+        Evaluator 若实现 health() 则用之，否则默认 healthy。
+        返回 {evaluator_id: {status, reason}} + 顶层 overall。
+        """
+        per: Dict[str, Dict[str, str]] = {}
+        worst = "healthy"
+        for eid, ev in self._evaluators.items():
+            h: EvaluatorHealth
+            if hasattr(ev, "health") and callable(getattr(ev, "health")):
+                try:
+                    h = ev.health()
+                except Exception as exc:  # noqa: BLE001 —— 健康自报自身不应拖垮注册表
+                    h = EvaluatorHealth(
+                        evaluator_id=eid,
+                        status="unavailable",
+                        reason=f"health() 自报异常：{exc}",
+                    )
+            else:
+                h = EvaluatorHealth(evaluator_id=eid, status="healthy")
+            per[eid] = {"status": h.status, "reason": h.reason}
+            if h.status == "unavailable":
+                worst = "unavailable"
+            elif h.status == "degraded" and worst == "healthy":
+                worst = "degraded"
+        return {"overall": worst, "evaluators": per}
 
     def dispatch_chain(
         self,

@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from ..judge_backend import JudgeCompletion, JudgeUnavailable, get_backend
-from .evaluator_protocol import EvaluatorInput, EvaluatorOutput
+from .evaluator_protocol import EvaluatorHealth, EvaluatorInput, EvaluatorOutput
 from .craft_tasks import CraftTask, get_reference, get_task
 from .registry import JOB_CRAFT_DIMS
 
@@ -284,12 +284,25 @@ class CraftJudgeEvaluator:
     """craft 试做题的 LLM-as-judge 评分，受 JudgeRegistry 统一派发约束。
 
     只评单题（task_id + answer）。多题聚合由调用方自行循环后 aggregate。
+
+    健康自报：依赖 judge 推理后端（MiniCPM-o 本地或 HTTP），后端不可用时
+    status=unavailable——注册表据此聚合，路由据此决定降级而非硬抛 503。
     """
 
     evaluator_id = "craft_judge"
     applicable_jobs = ["code", "text", "image"]
     # 产出维度 = 全部工种 craft 维的并集（每道题只用 target_dims 子集）
     declared_dims = sorted({d for dims in JOB_CRAFT_DIMS.values() for d in dims})
+
+    def health(self) -> EvaluatorHealth:
+        backend = get_backend()
+        if not backend.available:
+            return EvaluatorHealth(
+                evaluator_id=self.evaluator_id,
+                status="unavailable",
+                reason=f"judge 后端不可用（{backend.name}）",
+            )
+        return EvaluatorHealth(evaluator_id=self.evaluator_id, status="healthy")
 
     def evaluate(self, inp: EvaluatorInput) -> EvaluatorOutput:
         if not inp.task_id:

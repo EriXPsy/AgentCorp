@@ -627,7 +627,13 @@ export const useInterviewStore = create<InterviewState>((set, get) => ({
       ts: new Date().toISOString(),
     };
     try {
-      trial.judgement = await judgeCraftTask({ task_id: task.id, answer: answerText });
+      const j = await judgeCraftTask({ task_id: task.id, answer: answerText });
+      trial.judgement = j;
+      // 降级：judge 后端不可用时后端返回 200 + degraded=true，
+      // 机器证据仍有效，但 LLM 评分缺失——保留 judgement 带证据，标注原因。
+      if (j.degraded) {
+        trial.judgeError = j.degraded_reason || 'LLM 评分不可用，仅保留机器验证';
+      }
     } catch (e) {
       trial.judgeError =
         e instanceof Error ? e.message : '评分后端不可用，本题记为未评测';
