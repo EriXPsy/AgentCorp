@@ -116,8 +116,6 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
     gold_out = None
     gold_scores: dict = {}
     if req.verify and task.job_type == "code":
-        from ..sandbox import scan_python_answer, security_evidence_for
-
         sandbox_out = get_registry().dispatch("sandbox", EvaluatorInput(
             agent_id=req.task_id,  # sandbox 不需要 agent_id，用 task_id 代替
             job_type="code",
@@ -127,10 +125,16 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
         sandbox_payload = sandbox_out.metadata
         verified_evidence = dict(sandbox_out.verified_evidence)
 
-        # 安全扫描（独立证据链：执行验「能不能跑」，扫描验「危不危险」）
-        scan_result = scan_python_answer(answer)
-        scan_payload = scan_result.to_dict()
-        verified_evidence.update(security_evidence_for(task.id, scan_result))
+        # 安全扫描（经 SecurityScanEvaluator 派发，独立证据链：执行验「能不能跑」，扫描验「危不危险」）
+        scan_out = get_registry().dispatch("security_scan", EvaluatorInput(
+            agent_id=req.task_id,
+            job_type="code",
+            task_id=task.id,
+            answer=answer,
+        ))
+        scan_payload = scan_out.metadata
+        if scan_out.verified_evidence:
+            verified_evidence.update(scan_out.verified_evidence)
 
         # 金标准校准（GoldReference）：对 code 工种按 gold 正确性客观打分，
         # 复用 sandbox runner 跑同一道金标准夹具，结果覆盖 LLM 对该维的主观分。
@@ -264,7 +268,6 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
             }
         ),
     }
-
 
 @router.post("/api/craft-verify")
 async def api_craft_verify(req: CraftVerifyRequest) -> dict:

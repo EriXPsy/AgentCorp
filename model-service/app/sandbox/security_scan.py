@@ -134,12 +134,14 @@ _SECRET_NAMES = ("password", "passwd", "secret", "token", "api_key", "apikey", "
 #:       / hardcoded-secret / silent-except
 #: +7 = direct-socket / weak-hash:md5 / weak-hash:sha1 / file-write-variable-path
 #:       / ffi-usage / assert-on-tuple / bare-except-continued
+#: +1 = builtins-import-bypass
 #: 计数口径与 dict 一致：按「独立 rule 名」逐个计（故 weak-hash 的 md5/sha1 各算一条）。
 RULE_COUNT = (
     len(_DANGEROUS_CALLS)
     + len(_DANGEROUS_ATTR_CALLS)
     + 5  # subprocess / tls / pathjoin / secret / silent
     + 7  # socket / weak-hash-md5 / weak-hash-sha1 / file-write / ffi / assert-tuple / bare-except
+    + 1  # builtins-import-bypass
 )
 
 
@@ -246,6 +248,27 @@ class _Visitor(ast.NodeVisitor):
                     node,
                     "open(变量路径, 'w'/'a') 写文件，路径未做白名单/normpath 校验时存在越权写风险",
                 )
+
+        # 10) getattr(__builtins__, '__import__') 动态导入逃逸
+        #     getattr(__builtins__, '__import__') 绕过 import 黑名单的经典手法，
+        #     通过反射拿到 import 函数后动态加载任意模块。
+        if isinstance(node.func, ast.Name) and node.func.id == "getattr":
+            if len(node.args) >= 2:
+                first = node.args[0]
+                second = node.args[1]
+                if (
+                    isinstance(first, ast.Name)
+                    and first.id == "__builtins__"
+                    and isinstance(second, ast.Constant)
+                    and isinstance(second.value, str)
+                    and "import" in second.value
+                ):
+                    self._add(
+                        "builtins-import-bypass",
+                        "high",
+                        node,
+                        "getattr(__builtins__, '__import__') 动态导入逃逸，绕过 import 黑名单",
+                    )
 
         self.generic_visit(node)
 
