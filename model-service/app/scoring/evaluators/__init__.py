@@ -22,10 +22,12 @@ def register_all(registry: JudgeRegistry) -> None:
     from ..craft_judge import CraftJudgeEvaluator
     from ..arena_judge import ArenaJudgeEvaluator
     from .gold_reference_evaluator import GoldReferenceEvaluator
+    from ..designer import DesignerEvaluator
 
     for ev in [
         SandboxEvaluator(),
         SecurityScanEvaluator(),
+        DesignerEvaluator(),
         GrowthEvaluator(),
         EnterpriseFitEvaluator(),
         CraftJudgeEvaluator(),

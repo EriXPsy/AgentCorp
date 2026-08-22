@@ -40,13 +40,13 @@ class TestAllEvaluatorsRegistered:
         reg = JudgeRegistry()
         register_all(reg)
         ids = set(reg.list_ids())
-        for expected in ("craft_judge", "arena_judge", "sandbox", "security_scan", "growth", "enterprise_fit"):
+        for expected in ("craft_judge", "arena_judge", "sandbox", "security_scan", "designer", "growth", "enterprise_fit"):
             assert expected in ids, f"Evaluator '{expected}' 未注册"
 
-    def test_at_least_six_registered(self):
+    def test_at_least_seven_registered(self):
         reg = JudgeRegistry()
         register_all(reg)
-        assert len(reg.list_ids()) >= 6
+        assert len(reg.list_ids()) >= 7
 
 
 # ======================================================================
