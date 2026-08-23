@@ -170,6 +170,22 @@ class StyleMemory:
     reflection_count: int = 0
     synthesize_every: int = 3
 
+    # ---- 持续优化：Prompt 自我进化 ----
+    #: 进化后的 reflection system prompt（None = 用模块默认值）
+    evolved_reflection_system: Optional[str] = None
+    #: 进化后的 hypothesis system prompt（None = 用模块默认值）
+    evolved_hypothesis_system: Optional[str] = None
+    #: 反思质量评分历史（每次 evolve_check 追加一条 0-1 分数）
+    reflection_quality_history: List[float] = field(default_factory=list)
+    #: 假设命中率历史
+    hypothesis_accuracy_history: List[float] = field(default_factory=list)
+    #: 历史假设列表（与 observations 一一对应，供准确率审查）
+    hypothesis_history: List[str] = field(default_factory=list)
+    #: 累计进化次数
+    evolution_count: int = 0
+    #: 每多少次反思触发一次 prompt 审查
+    evolve_every: int = 20
+
     def to_dict(self) -> Dict:
         """Serialize to a JSON-friendly dict."""
         return {
@@ -181,6 +197,13 @@ class StyleMemory:
             "performance_log": list(self.performance_log),
             "reflection_count": self.reflection_count,
             "synthesize_every": self.synthesize_every,
+            "evolved_reflection_system": self.evolved_reflection_system,
+            "evolved_hypothesis_system": self.evolved_hypothesis_system,
+            "reflection_quality_history": list(self.reflection_quality_history),
+            "hypothesis_accuracy_history": list(self.hypothesis_accuracy_history),
+            "hypothesis_history": list(self.hypothesis_history),
+            "evolution_count": self.evolution_count,
+            "evolve_every": self.evolve_every,
         }
 
     @classmethod
@@ -195,6 +218,13 @@ class StyleMemory:
             performance_log=list(data.get("performance_log", [])),
             reflection_count=int(data.get("reflection_count", 0)),
             synthesize_every=int(data.get("synthesize_every", 3)),
+            evolved_reflection_system=data.get("evolved_reflection_system"),
+            evolved_hypothesis_system=data.get("evolved_hypothesis_system"),
+            reflection_quality_history=list(data.get("reflection_quality_history", [])),
+            hypothesis_accuracy_history=list(data.get("hypothesis_accuracy_history", [])),
+            hypothesis_history=list(data.get("hypothesis_history", [])),
+            evolution_count=int(data.get("evolution_count", 0)),
+            evolve_every=int(data.get("evolve_every", 20)),
         )
 
 
@@ -214,6 +244,8 @@ class Reflector:
     def __init__(self, temperature: float = 0.3, max_tokens: int = 1024):
         self.temperature = temperature
         self.max_tokens = max_tokens
+        # PromptEvolver 延迟导入（避免循环依赖）
+        self._evolver = None
 
     # -- public API ---------------------------------------------------------
 
@@ -230,16 +262,17 @@ class Reflector:
         """Reflect on one submission and update ``memory`` in place.
 
         Appends an evidence-based observation, refreshes the synthesized
-        understanding every ``memory.synthesize_every`` reflections, and always
-        re-hypothesizes the next challenge target. Returns the updated memory.
-        On LLM unavailability or garbage output the memory is returned
-        unchanged (aside from the always-safe performance log entry, which is
-        recorded only when an observation is successfully produced).
+        understanding every ``memory.synthesize_every`` reflections, records
+        the hypothesis, and triggers prompt evolution every ``evolve_every``
+        reflections. Returns the updated memory.
         """
+        # 使用进化后的 prompt（如果有）否则用默认值
+        reflection_system = memory.evolved_reflection_system or REFLECTION_SYSTEM_PROMPT
+
         # Call the LLM for a reflection observation.
         try:
             raw = self._call_llm(
-                system=REFLECTION_SYSTEM_PROMPT,
+                system=reflection_system,
                 user=self._build_reflection_user(
                     memory=memory,
                     challenge=task_prompt,
@@ -300,12 +333,18 @@ class Reflector:
         hypothesis = self._hypothesize_next(memory)
         if hypothesis:
             memory.next_challenge_hypothesis = hypothesis
+            # 记录假设历史（供 PromptEvolver 审查准确率）
+            memory.hypothesis_history.append(hypothesis)
+
+        # 定期触发 prompt 进化（每 evolve_every 次反思）
+        self._maybe_evolve(memory)
 
         logger.debug(
-            "Reflected for team %s (count=%d, understanding_len=%d)",
+            "Reflected for team %s (count=%d, understanding_len=%d, evolutions=%d)",
             memory.team_id,
             memory.reflection_count,
             len(memory.current_understanding),
+            memory.evolution_count,
         )
         return memory
 
@@ -388,13 +427,14 @@ class Reflector:
 
     def _hypothesize_next(self, memory: StyleMemory) -> str:
         """Predict what the next challenge should target. Returns '' on failure."""
+        hypothesis_system = memory.evolved_hypothesis_system or HYPOTHESIZE_SYSTEM_PROMPT
         user = HYPOTHESIZE_USER_TEMPLATE.format(
             understanding=memory.current_understanding.strip() or "(none yet)",
             performance_log=_format_performance_log(memory.performance_log),
             issued=_format_issued(memory.challenges_issued),
         )
         try:
-            raw = self._call_llm(system=HYPOTHESIZE_SYSTEM_PROMPT, user=user)
+            raw = self._call_llm(system=hypothesis_system, user=user)
         except JudgeUnavailable:
             logger.warning(
                 "Judge backend unavailable during hypothesis for team %s",
@@ -406,6 +446,34 @@ class Reflector:
             return ""
         cleaned = self._parse_reflection(raw)
         return cleaned or ""
+
+    # -- prompt evolution ---------------------------------------------------
+
+    def _get_evolver(self):
+        """延迟初始化 PromptEvolver（避免循环依赖）。"""
+        if self._evolver is None:
+            from .prompt_evolver import PromptEvolver
+            self._evolver = PromptEvolver()
+        return self._evolver
+
+    def _maybe_evolve(self, memory: StyleMemory) -> None:
+        """检查是否该触发 prompt 进化，如果是则调用 PromptEvolver。
+
+        进化失败不影响反思主流程（best-effort）。
+        """
+        try:
+            evolver = self._get_evolver()
+            if evolver.should_check(memory):
+                logger.info(
+                    "Triggering prompt evolution for team %s (reflection #%d)",
+                    memory.team_id, memory.reflection_count,
+                )
+                evolver.check_and_evolve(memory)
+        except Exception:  # noqa: BLE001 — 进化失败不应拖垮反思
+            logger.exception(
+                "Prompt evolution failed for team %s (non-fatal)",
+                memory.team_id,
+            )
 
     # -- parsing helpers ----------------------------------------------------
 
