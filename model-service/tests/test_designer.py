@@ -6,7 +6,7 @@ SPADE Designer 的单测。
 1. Designer prompt 构建
 2. LLM 响应解析（正常 JSON / markdown 包裹 / 非法输出）
 3. design_challenge 端到端（mock LLM）
-4. DesignerEvaluator evaluate（含降级路径）
+4. DesignerEvaluator evaluate（含降级路径 + StyleMemory 路径）
 5. harness 验证逻辑
 """
 from __future__ import annotations
@@ -39,21 +39,18 @@ def test_build_prompt_includes_profile_info():
         declared_focus="后端数据处理",
         primary_job_type="code",
         member_count=3,
-        strong_dims=["code_runnability"],
-        weak_dims=["code_security", "code_efficiency"],
-        avg_pass_rate=0.7,
-        difficulty_ceiling=0.6,
         eval_count=5,
         task_types_seen=["code_csv_merge", "code_json_transform"],
+        experience_lessons=["善于处理数据清洗", "忽视了并发安全"],
     )
     prompt = _build_designer_prompt(profile)
 
     assert "后端数据处理" in prompt
-    assert "code_runnability" in prompt
-    assert "code_security" in prompt
+    assert "t1" in prompt
+    assert "code_csv_merge" in prompt
     assert "code_json_transform" in prompt
-    assert "code_security" in prompt  # frontier_dim
-    assert "code_efficiency" in prompt
+    assert "善于处理数据清洗" in prompt
+    assert "忽视了并发安全" in prompt
 
 
 def test_build_prompt_available_dims():
@@ -141,9 +138,9 @@ def test_design_challenge_success(mock_get_backend):
         profile = TeamStyleProfile(
             team_id="t1",
             primary_job_type="code",
-            weak_dims=["code_efficiency"],
+            declared_focus="数据处理团队，善于清洗但忽视边界",
+            experience_lessons=["总是忘记处理空列表", "命名清晰"],
             eval_count=5,
-            difficulty_ceiling=0.5,
         )
         challenge = design_challenge(profile, validate=False)
 
@@ -208,9 +205,9 @@ def test_evaluator_dispatch(mock_get_backend):
             "team_id": "team_1",
             "profile": {
                 "primary_job_type": "code",
-                "weak_dims": ["code_efficiency"],
+                "declared_focus": "后端数据处理团队",
+                "experience_lessons": ["忽视空列表边界"],
                 "eval_count": 5,
-                "difficulty_ceiling": 0.5,
                 "task_types_seen": [],
             },
         },
@@ -224,6 +221,41 @@ def test_evaluator_dispatch(mock_get_backend):
     assert out.metadata["taskId"] == "adaptive_csv_filter"
     assert out.metadata["title"] == "过滤异常订单"
     assert out.confidence > 0
+
+
+@patch("app.scoring.designer.get_backend")
+def test_evaluator_dispatch_with_style_memory(mock_get_backend):
+    """经 StyleMemory 调用 Designer → 语义理解传入出题。"""
+    mock_backend = MagicMock()
+    mock_backend.available = True
+    mock_backend.complete.return_value = JudgeCompletion(
+        text=_GOOD_DESIGNER_RESPONSE,
+        backend="mock",
+        model="test",
+    )
+    mock_get_backend.return_value = mock_backend
+
+    ev = DesignerEvaluator()
+    inp = EvaluatorInput(
+        agent_id="team_1",
+        job_type="code",
+        options={
+            "team_id": "team_1",
+            "style_memory": {
+                "current_understanding": "该团队偏爱函数式风格，但总是忘记异常处理",
+                "next_challenge_hypothesis": "下一道题应该考查异常边界",
+                "reflection_count": 6,
+                "challenges_issued": ["code_csv_merge"],
+            },
+        },
+    )
+
+    with patch.object(settings, "sandbox_enabled", False):
+        out = ev.evaluate(inp)
+
+    assert out.evaluator_id == "designer"
+    assert not out.degraded
+    assert out.metadata["taskId"] == "adaptive_csv_filter"
 
 
 def test_evaluator_missing_team_id():

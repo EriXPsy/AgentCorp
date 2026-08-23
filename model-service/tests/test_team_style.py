@@ -1,228 +1,144 @@
 """
 model-service/tests/test_team_style.py
-TeamStyleProfile 合成逻辑的单测。
+TeamStyleProfile 初始化的单测。
 
-覆盖：
-1. 基本合成 — 成员 + 评测 → profile
-2. 强弱维度分类
-3. 沙箱通过率计算
-4. 难度上限映射
-5. 校准状态（is_calibrated）
-6. 序列化为 Designer prompt
-7. 边界：空数据、单成员、无评测
+注意：维度强弱分类、通过率、难度上限等「涌现指标」不再在 team_style.py 计算，
+而是由 StyleMemory（style_memory.py）通过 SPADE 反思涌现。本测试只覆盖初始画像构建。
 """
 from __future__ import annotations
 
 import pytest
 
 from app.scoring.team_style import (
-    EvalSnapshot,
     MemberSnapshot,
     TeamStyleProfile,
-    synthesize_profile,
+    build_initial_profile,
 )
 
 
 # ======================================================================
-# 1) 基本合成
+# 1) 基本构建
 # ======================================================================
-def test_basic_synthesis():
-    """3 个成员 + 5 次评测 → 完整 profile。"""
+def test_basic_build():
+    """3 个成员 + 描述 → 完整 profile。"""
     members = [
-        MemberSnapshot(agent_id="a1", job_type="code", tasks_completed=10),
-        MemberSnapshot(agent_id="a2", job_type="code", tasks_completed=8),
-        MemberSnapshot(agent_id="a3", job_type="text", tasks_completed=3),
+        MemberSnapshot(agent_id="a1", job_type="code"),
+        MemberSnapshot(agent_id="a2", job_type="code"),
+        MemberSnapshot(agent_id="a3", job_type="text"),
     ]
-    evals = [
-        EvalSnapshot("code_csv_merge", "code", {"code_runnability": 4.5, "code_test_coverage": 4.0}),
-        EvalSnapshot("code_csv_merge", "code", {"code_runnability": 4.0, "code_test_coverage": 3.5}),
-        EvalSnapshot("code_json_transform", "code", {"code_runnability": 4.5, "code_maintainability": 3.0}),
-        EvalSnapshot("code_list_dedup_sort", "code", {"code_runnability": 4.0, "code_efficiency": 2.0}),
-        EvalSnapshot("code_word_frequency", "code", {"code_runnability": 3.5, "code_efficiency": 2.0}),
-    ]
-    profile = synthesize_profile(
+    profile = build_initial_profile(
         "team_1",
         description="数据处理团队",
         members=members,
-        evals=evals,
-        experience_lessons=["处理千分位时要先去掉货币符号", "CSV 空行要跳过"],
     )
 
     assert profile.team_id == "team_1"
     assert profile.primary_job_type == "code"  # 2 code vs 1 text
     assert profile.member_count == 3
-    assert profile.eval_count == 5
-    assert profile.is_calibrated  # >= 3 次评测
+    assert profile.declared_focus == "数据处理团队"
+    assert profile.eval_count == 0  # 初始为零
 
 
 def test_empty_data_produces_minimal_profile():
-    """无成员、无评测 → 最小 profile（未校准）。"""
-    profile = synthesize_profile("team_empty")
+    """无成员、无描述 → 最小 profile。"""
+    profile = build_initial_profile("team_empty")
 
     assert profile.team_id == "team_empty"
     assert profile.primary_job_type == "code"  # 默认
     assert profile.member_count == 0
+    assert profile.declared_focus == ""
     assert profile.eval_count == 0
-    assert not profile.is_calibrated
-    assert profile.strong_dims == []
-    assert profile.weak_dims == []
+    assert profile.experience_lessons == []
+    assert profile.member_snapshots == []
+    assert profile.task_types_seen == []
 
 
-# ======================================================================
-# 2) 强弱维度分类
-# ======================================================================
-def test_strong_dims_classified():
-    """稳定高分（>= 3.5 且 >= 2 次）→ strong。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_runnability": 4.5}),
-        EvalSnapshot("t2", "code", {"code_runnability": 4.0}),
-        EvalSnapshot("t3", "code", {"code_runnability": 4.2}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert "code_runnability" in profile.strong_dims
+def test_profile_with_experience_lessons():
+    """经验卡片正确传递。"""
+    lessons = ["处理千分位要先去掉货币符号", "CSV 空行要跳过"]
+    profile = build_initial_profile(
+        "t",
+        experience_lessons=lessons,
+    )
+    assert profile.experience_lessons == lessons
 
 
-def test_weak_dims_classified():
-    """稳定低分（< 2.5）→ weak，按均分升序排。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_security": 2.0, "code_efficiency": 1.5}),
-        EvalSnapshot("t2", "code", {"code_security": 2.0, "code_efficiency": 2.0}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert "code_security" in profile.weak_dims
-    assert "code_efficiency" in profile.weak_dims
-    # code_efficiency 均分更低（1.75 < 2.0），应该排在前面
-    assert profile.weak_dims.index("code_efficiency") < profile.weak_dims.index("code_security")
-
-
-def test_middle_dims_not_classified():
-    """中间分（2.5-3.5）既不强也不弱。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_maintainability": 3.0}),
-        EvalSnapshot("t2", "code", {"code_maintainability": 3.2}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert "code_maintainability" not in profile.strong_dims
-    assert "code_maintainability" not in profile.weak_dims
-
-
-def test_single_eval_not_classified_as_strong():
-    """只有 1 次高分不判为强（样本不足）。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_runnability": 5.0}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert "code_runnability" not in profile.strong_dims  # 只 1 次，不够
-
-
-# ======================================================================
-# 3) 沙箱通过率
-# ======================================================================
-def test_pass_rate_calculation():
-    """7 过 3 败 → 0.7。"""
-    results = [True] * 7 + [False] * 3
-    profile = synthesize_profile("t", sandbox_results=results)
-    assert abs(profile.avg_pass_rate - 0.7) < 1e-9
-
-
-def test_no_sandbox_results():
-    """无沙箱数据 → pass_rate=0。"""
-    profile = synthesize_profile("t")
-    assert profile.avg_pass_rate == 0.0
-
-
-# ======================================================================
-# 4) 难度上限映射
-# ======================================================================
-def test_difficulty_ceiling_high_pass_rate():
-    """通过率 100% → ceiling 高（还能挑战更难的）。"""
-    profile = synthesize_profile("t", sandbox_results=[True] * 10)
-    assert profile.difficulty_ceiling >= 0.8
-
-
-def test_difficulty_ceiling_low_pass_rate():
-    """通过率 20% → ceiling 低（远超当前能力）。"""
-    results = [True, True] + [False] * 8
-    profile = synthesize_profile("t", sandbox_results=results)
-    assert profile.difficulty_ceiling < 0.4
-
-
-# ======================================================================
-# 5) 校准状态
-# ======================================================================
-def test_is_calibrated_threshold():
-    """< 3 次评测 → 未校准。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_runnability": 4.0}),
-        EvalSnapshot("t2", "code", {"code_runnability": 3.5}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert not profile.is_calibrated
-
-    evals.append(EvalSnapshot("t3", "code", {"code_runnability": 4.0}))
-    profile = synthesize_profile("t", evals=evals)
-    assert profile.is_calibrated
-
-
-# ======================================================================
-# 6) frontier_dim
-# ======================================================================
-def test_frontier_dim_is_first_weak():
-    """frontier_dim 返回 weak_dims 的第一个（最弱的）。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_security": 2.0, "code_efficiency": 1.5}),
-        EvalSnapshot("t2", "code", {"code_security": 2.0, "code_efficiency": 2.0}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert profile.frontier_dim == "code_efficiency"  # 最弱的
-
-
-def test_frontier_dim_none_when_no_weak():
-    """无弱项时 frontier_dim 为 None。"""
-    evals = [
-        EvalSnapshot("t1", "code", {"code_runnability": 4.5}),
-        EvalSnapshot("t2", "code", {"code_runnability": 4.0}),
-    ]
-    profile = synthesize_profile("t", evals=evals)
-    assert profile.frontier_dim is None
-
-
-# ======================================================================
-# 7) to_prompt_context
-# ======================================================================
-def test_to_prompt_context_includes_key_info():
-    """序列化包含关键信息。"""
+def test_dominant_job_type():
+    """成员数最多的 job_type 胜出。"""
     members = [
-        MemberSnapshot(agent_id="a1", job_type="code"),
+        MemberSnapshot(agent_id="a1", job_type="text"),
+        MemberSnapshot(agent_id="a2", job_type="text"),
+        MemberSnapshot(agent_id="a3", job_type="text"),
+        MemberSnapshot(agent_id="a4", job_type="code"),
+    ]
+    profile = build_initial_profile("t", members=members)
+    assert profile.primary_job_type == "text"
+
+
+def test_no_members_defaults_to_code():
+    """无成员时默认 code。"""
+    profile = build_initial_profile("t", members=[])
+    assert profile.primary_job_type == "code"
+
+
+def test_members_without_job_type():
+    """成员的 job_type 为 None 时不影响统计。"""
+    members = [
+        MemberSnapshot(agent_id="a1", job_type=None),
         MemberSnapshot(agent_id="a2", job_type="code"),
     ]
-    evals = [
-        EvalSnapshot("t1", "code", {"code_runnability": 4.5, "code_security": 1.5}),
-        EvalSnapshot("t2", "code", {"code_runnability": 4.0, "code_security": 2.0}),
-        EvalSnapshot("t3", "code", {"code_runnability": 4.2, "code_security": 1.8}),
+    profile = build_initial_profile("t", members=members)
+    assert profile.primary_job_type == "code"
+
+
+# ======================================================================
+# 2) 字段独立性
+# ======================================================================
+def test_eval_count_starts_zero():
+    """新建 profile 的 eval_count 为 0。"""
+    profile = build_initial_profile("t")
+    assert profile.eval_count == 0
+
+
+def test_task_types_seen_starts_empty():
+    """新建 profile 的 task_types_seen 为空。"""
+    profile = build_initial_profile("t")
+    assert profile.task_types_seen == []
+
+
+def test_member_snapshots_stored():
+    """成员快照正确保存。"""
+    members = [
+        MemberSnapshot(agent_id="a1", job_type="code", tasks_completed=10),
+        MemberSnapshot(agent_id="a2", job_type="code", tasks_completed=5),
     ]
-    profile = synthesize_profile(
-        "team_1",
-        description="全栈开发团队",
-        members=members,
-        evals=evals,
-        experience_lessons=["要处理边界情况"],
-        sandbox_results=[True, True, True, False],
-    )
-    ctx = profile.to_prompt_context()
-
-    assert "team_1" in ctx
-    assert "全栈开发团队" in ctx
-    assert "code" in ctx
-    assert "code_runnability" in ctx  # 强项
-    assert "code_security" in ctx     # 弱项
-    assert "75%" in ctx               # 通过率 3/4=75%
-    assert "要处理边界情况" in ctx      # 经验
+    profile = build_initial_profile("t", members=members)
+    assert len(profile.member_snapshots) == 2
+    assert profile.member_snapshots[0].tasks_completed == 10
 
 
-def test_to_prompt_context_empty_profile():
-    """空 profile 序列化不崩。"""
-    profile = synthesize_profile("empty")
-    ctx = profile.to_prompt_context()
-    assert "empty" in ctx
-    assert "未声明" in ctx
+# ======================================================================
+# 3) 确认不再有旧字段（防止回退）
+# ======================================================================
+def test_no_strong_dims_field():
+    """TeamStyleProfile 不应有 strong_dims（已移至 StyleMemory）。"""
+    profile = build_initial_profile("t")
+    assert not hasattr(profile, "strong_dims")
+
+
+def test_no_weak_dims_field():
+    """TeamStyleProfile 不应有 weak_dims（已移至 StyleMemory）。"""
+    profile = build_initial_profile("t")
+    assert not hasattr(profile, "weak_dims")
+
+
+def test_no_difficulty_ceiling_field():
+    """TeamStyleProfile 不应有 difficulty_ceiling（已移至 StyleMemory）。"""
+    profile = build_initial_profile("t")
+    assert not hasattr(profile, "difficulty_ceiling")
+
+
+def test_no_synthesize_profile():
+    """synthesize_profile 应已移除。"""
+    import app.scoring.team_style as ts
+    assert not hasattr(ts, "synthesize_profile")

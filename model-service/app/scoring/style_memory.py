@@ -1,0 +1,476 @@
+"""Semantic style memory for the SPADE-inspired adaptive challenge system.
+
+In SPADE (Self-Play through Adaptive DEsign), the Designer LLM does not merely
+score a team's submission with fixed metrics. Instead it keeps a *semantic
+memory* of each team's evolving coding style and engineering taste. After every
+evaluation the Designer *reflects* on the submission, appends an evidence-based
+observation to the team's memory, and periodically re-synthesizes those
+observations into a coherent style description.
+
+Why semantic memory beats fixed metrics
+---------------------------------------
+Fixed metrics (lint score, cyclomatic complexity, pass rate) are blind to
+*aesthetic* and *structural* choices that recur across tasks but never trigger
+a rule: a team that always writes 200-line single functions, or that reaches
+for inheritance where composition would do, or that handles boundary errors
+with silent defaults. A semantic memory captures these as prose that can be
+reasoned about, challenged, and compared. The next challenge is then
+*hypothesized* from the memory rather than sampled from a fixed pool, so the
+system adapts to the team instead of re-measuring the same thing forever.
+
+Reflection loop
+---------------
+    reflect(submission) -> observation -> append
+         every 3 reflections -> _synthesize() -> current_understanding
+         always              -> _hypothesize_next() -> next_challenge_hypothesis
+    next challenge is generated from next_challenge_hypothesis
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from ..judge_backend import (  # noqa: E402
+    JudgeCompletion,
+    JudgeUnavailable,
+    get_backend,
+)
+
+logger = logging.getLogger("style_memory")
+
+
+# ---------------------------------------------------------------------------
+# Reflection prompt templates
+# ---------------------------------------------------------------------------
+
+REFLECTION_SYSTEM_PROMPT = (
+    "You are an expert at analyzing team coding style and engineering taste.\n"
+    "You observe a team's answer to a challenge and reflect on what their code\n"
+    "reveals about their style, strengths, weaknesses, and aesthetic preferences.\n"
+    "Be specific and evidence-based — cite actual patterns from the code, not "
+    "generic praise."
+)
+
+REFLECTION_USER_TEMPLATE = """\
+You previously formed this understanding of the team (may be empty on first contact):
+--- CURRENT UNDERSTANDING ---
+{current_understanding}
+-----------------------------
+
+A challenge was issued:
+--- CHALLENGE ---
+{challenge}
+----------------
+
+The team submitted this answer:
+--- ANSWER ---
+{answer}
+------------
+
+The LLM judge assigned these scores (JSON):
+{scores}
+
+The sandbox outcome for the submission was: {outcome}
+
+Reflect on what this submission reveals. Write a focused observation of 2-3 \
+sentences that covers, where the evidence supports it:
+  a) Style or structural patterns you did NOT notice before (or that recur /
+     contradict your current understanding).
+  b) What the code organization reveals about the team's aesthetic preferences.
+  c) Which edge cases they handled versus ignored, and what that choice pattern
+     suggests about their engineering priorities.
+
+Do not restate the scores. Do not praise generically. Cite concrete patterns \
+from the code. Return only the observation text, with no markdown formatting \
+and no preamble like "Observation:".
+"""
+
+SYNTHESIZE_SYSTEM_PROMPT = (
+    "You are an expert at synthesizing observations about a team's coding "
+    "style into a coherent, evidence-based description. Be specific and "
+    "grounded in the observations provided."
+)
+
+SYNTHESIZE_USER_TEMPLATE = """\
+Below are recent observations about a team's coding style, oldest first:
+--- OBSERVATIONS ---
+{observations}
+--------------------
+
+The prior synthesized understanding (may be empty) was:
+--- PRIOR UNDERSTANDING ---
+{prior_understanding}
+---------------------------
+
+Synthesize these into a coherent description of the team's style in 3-5 \
+sentences. Focus on durable, recurring patterns — aesthetic preferences, \
+structural habits, how they treat edge cases, strengths, and weaknesses. \
+Drop one-off details. Resolve contradictions by noting them explicitly. \
+Return only the description, with no markdown formatting and no preamble.
+"""
+
+HYPOTHESIZE_SYSTEM_PROMPT = (
+    "You are a challenge designer. Given what you know about a team's style "
+    "and their performance history, you decide what the next challenge should "
+    "target to stretch them and reveal more about their engineering taste."
+)
+
+HYPOTHESIZE_USER_TEMPLATE = """\
+Current understanding of the team:
+--- UNDERSTANDING ---
+{understanding}
+--------------------
+
+Their performance log (most recent last), as JSON:
+{performance_log}
+
+Challenges already issued (avoid repeating these or near-duplicates):
+{issued}
+
+What should the NEXT challenge target? Describe, in 2-3 sentences, the skill, "
+"blind spot, or aesthetic preference it should probe and why, given the "
+"evidence above. Do not propose a concrete task spec — propose a *target*. "
+"Return only the target description, with no markdown formatting and no preamble.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StyleMemory:
+    """Semantic memory of one team's evolving coding style.
+
+    Attributes:
+        team_id: Identifier of the team this memory belongs to.
+        observations: One evidence-based reflection per evaluation, in order.
+        current_understanding: Synthesized prose description, refreshed every
+            ``synthesize_every`` reflections.
+        next_challenge_hypothesis: The Designer's current belief about what the
+            team should be challenged on next.
+        challenges_issued: Task IDs already issued, so challenges are not
+            repeated.
+        performance_log: Per-task records of outcome and scores.
+        reflection_count: Number of reflections appended so far.
+        synthesize_every: How many reflections between re-syntheses.
+    """
+
+    team_id: str
+    observations: List[str] = field(default_factory=list)
+    current_understanding: str = ""
+    next_challenge_hypothesis: str = ""
+    challenges_issued: List[str] = field(default_factory=list)
+    performance_log: List[Dict] = field(default_factory=list)
+    reflection_count: int = 0
+    synthesize_every: int = 3
+
+    def to_dict(self) -> Dict:
+        """Serialize to a JSON-friendly dict."""
+        return {
+            "team_id": self.team_id,
+            "observations": list(self.observations),
+            "current_understanding": self.current_understanding,
+            "next_challenge_hypothesis": self.next_challenge_hypothesis,
+            "challenges_issued": list(self.challenges_issued),
+            "performance_log": list(self.performance_log),
+            "reflection_count": self.reflection_count,
+            "synthesize_every": self.synthesize_every,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "StyleMemory":
+        """Rehydrate from a dict produced by :meth:`to_dict`."""
+        return cls(
+            team_id=data["team_id"],
+            observations=list(data.get("observations", [])),
+            current_understanding=data.get("current_understanding", ""),
+            next_challenge_hypothesis=data.get("next_challenge_hypothesis", ""),
+            challenges_issued=list(data.get("challenges_issued", [])),
+            performance_log=list(data.get("performance_log", [])),
+            reflection_count=int(data.get("reflection_count", 0)),
+            synthesize_every=int(data.get("synthesize_every", 3)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Reflector
+# ---------------------------------------------------------------------------
+
+
+class Reflector:
+    """Drives the SPADE reflection loop for a team's :class:`StyleMemory`.
+
+    The reflector calls the judge LLM backend at temperature 0.3 (more
+    deterministic than the Designer's generation temperature) so reflections
+    stay grounded in evidence rather than drifting.
+    """
+
+    def __init__(self, temperature: float = 0.3, max_tokens: int = 1024):
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+    # -- public API ---------------------------------------------------------
+
+    def reflect(
+        self,
+        task_prompt: str,
+        answer: str,
+        scores: Dict,
+        outcome: str,
+        memory: StyleMemory,
+        task_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> StyleMemory:
+        """Reflect on one submission and update ``memory`` in place.
+
+        Appends an evidence-based observation, refreshes the synthesized
+        understanding every ``memory.synthesize_every`` reflections, and always
+        re-hypothesizes the next challenge target. Returns the updated memory.
+        On LLM unavailability or garbage output the memory is returned
+        unchanged (aside from the always-safe performance log entry, which is
+        recorded only when an observation is successfully produced).
+        """
+        # Call the LLM for a reflection observation.
+        try:
+            raw = self._call_llm(
+                system=REFLECTION_SYSTEM_PROMPT,
+                user=self._build_reflection_user(
+                    memory=memory,
+                    challenge=task_prompt,
+                    answer=answer,
+                    scores=scores,
+                    outcome=outcome,
+                ),
+            )
+        except JudgeUnavailable:
+            logger.warning(
+                "Judge backend unavailable during reflection for team %s; "
+                "memory left unchanged",
+                memory.team_id,
+            )
+            return memory
+        except Exception:  # noqa: BLE001 - defensive: never let reflection crash
+            logger.exception(
+                "Unexpected error reflecting for team %s", memory.team_id
+            )
+            return memory
+
+        observation = self._parse_reflection(raw)
+        if not observation:
+            logger.warning(
+                "Reflection for team %s produced no usable observation; "
+                "skipping append (raw length=%d)",
+                memory.team_id,
+                len(raw) if raw else 0,
+            )
+            return memory
+
+        # Append the observation and bump the counter.
+        memory.observations.append(observation)
+        memory.reflection_count += 1
+
+        # Track the challenge as issued.
+        if task_id and task_id not in memory.challenges_issued:
+            memory.challenges_issued.append(task_id)
+
+        # Record performance (only once we have a real observation to attach
+        # it to, so the log stays paired with reflections).
+        memory.performance_log.append(
+            {
+                "task_id": task_id,
+                "outcome": outcome,
+                "scores": dict(scores) if isinstance(scores, dict) else scores,
+                "timestamp": timestamp,
+            }
+        )
+
+        # Periodically re-synthesize the coherent understanding.
+        if memory.reflection_count % max(1, memory.synthesize_every) == 0:
+            synthesized = self._synthesize(memory)
+            if synthesized:
+                memory.current_understanding = synthesized
+
+        # Always re-hypothesize the next challenge target.
+        hypothesis = self._hypothesize_next(memory)
+        if hypothesis:
+            memory.next_challenge_hypothesis = hypothesis
+
+        logger.debug(
+            "Reflected for team %s (count=%d, understanding_len=%d)",
+            memory.team_id,
+            memory.reflection_count,
+            len(memory.current_understanding),
+        )
+        return memory
+
+    # -- LLM calls ----------------------------------------------------------
+
+    def _call_llm(self, system: str, user: str) -> str:
+        """Call the judge backend and return the raw text completion.
+
+        Raises :class:`JudgeUnavailable` if the backend cannot be reached, so
+        the caller can degrade gracefully.
+        """
+        backend = get_backend()
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        completion: JudgeCompletion = backend.complete(
+            messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        text = getattr(completion, "text", None)
+        if text is None and isinstance(completion, dict):
+            text = completion.get("text") or completion.get("content")
+        return text or ""
+
+    def _build_reflection_user(
+        self,
+        memory: StyleMemory,
+        challenge: str,
+        answer: str,
+        scores: Dict,
+        outcome: str,
+    ) -> str:
+        understanding = memory.current_understanding.strip() or "(none yet)"
+        try:
+            scores_text = json.dumps(scores, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            scores_text = str(scores)
+        return REFLECTION_USER_TEMPLATE.format(
+            current_understanding=understanding,
+            challenge=challenge,
+            answer=answer,
+            scores=scores_text,
+            outcome=outcome,
+        )
+
+    # -- reflection / synthesis / hypothesis --------------------------------
+
+    def _synthesize(self, memory: StyleMemory) -> str:
+        """Synthesize the last observations into a coherent style description.
+
+        Returns an empty string on failure so the caller can skip the update.
+        """
+        # Use the last 5-10 observations plus the prior understanding.
+        recent = memory.observations[-10:]
+        if not recent:
+            return ""
+        observations_block = "\n".join(
+            f"{i + 1}. {obs}" for i, obs in enumerate(recent)
+        )
+        user = SYNTHESIZE_USER_TEMPLATE.format(
+            observations=observations_block,
+            prior_understanding=memory.current_understanding.strip()
+            or "(none yet)",
+        )
+        try:
+            raw = self._call_llm(system=SYNTHESIZE_SYSTEM_PROMPT, user=user)
+        except JudgeUnavailable:
+            logger.warning(
+                "Judge backend unavailable during synthesis for team %s",
+                memory.team_id,
+            )
+            return ""
+        except Exception:  # noqa: BLE001
+            logger.exception("Synthesis failed for team %s", memory.team_id)
+            return ""
+        cleaned = self._parse_reflection(raw)
+        return cleaned or ""
+
+    def _hypothesize_next(self, memory: StyleMemory) -> str:
+        """Predict what the next challenge should target. Returns '' on failure."""
+        user = HYPOTHESIZE_USER_TEMPLATE.format(
+            understanding=memory.current_understanding.strip() or "(none yet)",
+            performance_log=_format_performance_log(memory.performance_log),
+            issued=_format_issued(memory.challenges_issued),
+        )
+        try:
+            raw = self._call_llm(system=HYPOTHESIZE_SYSTEM_PROMPT, user=user)
+        except JudgeUnavailable:
+            logger.warning(
+                "Judge backend unavailable during hypothesis for team %s",
+                memory.team_id,
+            )
+            return ""
+        except Exception:  # noqa: BLE001
+            logger.exception("Hypothesis failed for team %s", memory.team_id)
+            return ""
+        cleaned = self._parse_reflection(raw)
+        return cleaned or ""
+
+    # -- parsing helpers ----------------------------------------------------
+
+    @staticmethod
+    def _parse_reflection(text: str) -> str:
+        """Extract a clean observation from an LLM response.
+
+        Strips markdown code fences, ``<thinking>``/``<thought>`` blocks,
+        common preambles, and surrounding whitespace. Returns an empty string
+        if nothing substantive remains, so callers can treat it as garbage.
+        """
+        if not text:
+            return ""
+
+        cleaned = text
+
+        # Remove <thinking>...</thinking> or <thought>...</thought> blocks.
+        cleaned = re.sub(
+            r"<\s*(?:thinking|thought)\b[^>]*>.*?<\s*/\s*(?:thinking|thought)\s*>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Remove any other stray XML-ish tags.
+        cleaned = re.sub(r"</?[a-zA-Z][^>\n]*>", "", cleaned)
+
+        # Remove markdown code fences, keeping inner content if present.
+        cleaned = re.sub(r"```[a-zA-Z0-9_-]*\n?", "", cleaned)
+        cleaned = cleaned.replace("```", "")
+
+        # Strip common preambles the model might add despite instructions.
+        cleaned = re.sub(
+            r"^\s*(?:observation|reflection|analysis)\s*[:\-–—]\s*",
+            "",
+            cleaned,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+        # Collapse excessive blank lines and trim.
+        cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        cleaned = cleaned.strip()
+
+        return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+
+def _format_performance_log(performance_log: List[Dict]) -> str:
+    """Render the performance log as compact JSON for prompts."""
+    if not performance_log:
+        return "(no prior tasks)"
+    recent = performance_log[-10:]
+    try:
+        return json.dumps(recent, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError):
+        return str(recent)
+
+
+def _format_issued(challenges_issued: List[str]) -> str:
+    """Render the list of issued task IDs for prompts."""
+    if not challenges_issued:
+        return "(none)"
+    return "\n".join(f"- {tid}" for tid in challenges_issued)

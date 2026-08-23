@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
-from .routes import arena, convergence, evaluate, growth, health, judge, leaderboard, samples, upload
+from .routes import arena, convergence, designer_route, evaluate, growth, health, judge, leaderboard, samples, upload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,6 +83,7 @@ app.include_router(judge.router)
 app.include_router(growth.router)
 app.include_router(health.router)
 app.include_router(arena.router)
+app.include_router(designer_route.router)
 
 
 class SPAStaticFiles(StaticFiles):
