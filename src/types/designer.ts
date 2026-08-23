@@ -1,0 +1,68 @@
+/**
+ * src/types/designer.ts
+ * SPADE Designer / StyleMemory 前端类型定义。
+ *
+ * 与后端 model-service/app/scoring/style_memory.py 的 StyleMemory dataclass
+ * 和 designer_route.py 的请求/响应模型对齐。
+ */
+
+// ── StyleMemory（与后端 StyleMemory.to_dict() 对齐）──────────────────
+
+export interface StyleMemory {
+  team_id: string;
+  observations: string[];
+  current_understanding: string;
+  next_challenge_hypothesis: string;
+  challenges_issued: string[];
+  performance_log: PerformanceEntry[];
+  reflection_count: number;
+  synthesize_every: number;
+  evolved_reflection_system: string | null;
+  evolved_hypothesis_system: string | null;
+  reflection_quality_history: number[];
+  hypothesis_accuracy_history: number[];
+  hypothesis_history: string[];
+  evolution_count: number;
+  evolve_every: number;
+}
+
+export interface PerformanceEntry {
+  task_id: string;
+  outcome: string;
+  scores: Record<string, number>;
+  ts?: string;
+}
+
+// ── API 请求/响应 ─────────────────────────────────────────────────────
+
+export interface ChallengeRequest {
+  team_id: string;
+  job_type?: string;
+  description?: string;
+  member_count?: number;
+}
+
+export interface ChallengeResponse {
+  task_id: string;
+  title: string;
+  prompt: string;
+  target_dims: string[];
+  checkpoints: string[];
+  difficulty: number;
+  design_rationale: string;
+}
+
+export interface ReflectRequest {
+  team_id: string;
+  task_id: string;
+  answer: string;
+  scores: Record<string, number>;
+  outcome: string;
+}
+
+export interface ReflectResponse {
+  observation: string;
+  reflection_count: number;
+  current_understanding: string;
+  next_hypothesis: string;
+}
