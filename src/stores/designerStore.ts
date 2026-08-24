@@ -8,13 +8,14 @@
  * - 出题失败时优雅降级（保留旧 challenge）
  */
 import { create } from 'zustand';
-import { requestChallenge, submitReflection, loadMemory, submitAgentReflection, loadAgentMemory } from '@/services/designerClient';
+import { requestChallenge, submitReflection, loadMemory, submitAgentReflection, loadAgentMemory, fetchTeamGaps } from '@/services/designerClient';
 import type {
   AgentMemory,
   AgentReflectResponse,
   ChallengeResponse,
   ReflectResponse,
   StyleMemory,
+  TeamGapResponse,
 } from '@/types/designer';
 
 interface DesignerState {
@@ -37,6 +38,12 @@ interface DesignerState {
   /** 最近一次 Agent 反思结果 */
   lastAgentReflection: AgentReflectResponse | null;
 
+  // ── 团队缺口检测 ──
+  /** 团队缺口分析缓存 {team_id: TeamGapResponse} */
+  teamGaps: Record<string, TeamGapResponse>;
+  /** 已通知过的缺口 key（避免重复弹通知） */
+  notifiedGapKeys: string[];
+
   /** 加载团队的 StyleMemory */
   fetchMemory: (teamId: string) => Promise<void>;
   /** 请求 Designer 出题 */
@@ -47,6 +54,8 @@ interface DesignerState {
   reflectAgent: (agentId: string, teamId: string, taskId: string, answer: string, scores: Record<string, number>, outcome: string) => Promise<AgentReflectResponse | null>;
   /** 加载单个 Agent 成长档案 */
   fetchAgentMemory: (agentId: string) => Promise<void>;
+  /** 分析团队能力缺口（驱动主动招聘通知） */
+  fetchTeamGaps: (teamId: string) => Promise<TeamGapResponse | null>;
   /** 清空状态（切换团队时） */
   reset: () => void;
   clearError: () => void;
@@ -61,6 +70,8 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
   error: null,
   agentMemories: {},
   lastAgentReflection: null,
+  teamGaps: {},
+  notifiedGapKeys: [],
 
   fetchMemory: async (teamId) => {
     // 已加载过同一团队则跳过
@@ -160,6 +171,21 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
     }
   },
 
+  fetchTeamGaps: async (teamId) => {
+    try {
+      const gaps = await fetchTeamGaps(teamId);
+      set((state) => ({ teamGaps: { ...state.teamGaps, [teamId]: gaps } }));
+      return gaps;
+    } catch (e) {
+      // 404 = 团队尚无记录，静默处理
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('404') && !msg.includes('不存在')) {
+        console.warn('[designerStore] team gaps analysis failed:', e);
+      }
+      return null;
+    }
+  },
+
   fetchAgentMemory: async (agentId) => {
     try {
       const memory = await loadAgentMemory(agentId);
@@ -184,6 +210,8 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
     error: null,
     agentMemories: {},
     lastAgentReflection: null,
+    teamGaps: {},
+    notifiedGapKeys: [],
   }),
 
   clearError: () => set({ error: null }),

@@ -103,6 +103,16 @@ export interface AgentReflectResponse {
   growth_summary: string;
 }
 
+export interface TeamGapResponse {
+  team_id: string;
+  gaps: string[];
+  recommended_skills: string[];
+  hiring_urgency: 'low' | 'medium' | 'high';
+  hiring_reason: string;
+  team_strengths: string[];
+  team_size: number;
+}
+
 export interface TeamAgentsMemory {
   team_id: string;
   agents: Record<string, {

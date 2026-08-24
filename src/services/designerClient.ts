@@ -21,6 +21,7 @@ import type {
   ReflectResponse,
   StyleMemory,
   TeamAgentsMemory,
+  TeamGapResponse,
 } from '@/types/designer';
 
 /** 请求 Designer 出题（基于团队 StyleMemory） */
@@ -61,6 +62,14 @@ export async function loadAgentMemory(agentId: string): Promise<AgentMemory> {
   return hostApiFetch<AgentMemory>(`/api/designer/agent-memory/${encodeURIComponent(agentId)}`, {
     method: 'GET',
   });
+}
+
+/** 分析团队能力缺口（用于主动招聘通知） */
+export async function fetchTeamGaps(teamId: string): Promise<TeamGapResponse> {
+  return hostApiFetch<TeamGapResponse>(
+    `/api/designer/team-gaps/${encodeURIComponent(teamId)}`,
+    { method: 'GET' },
+  );
 }
 
 /** 读取一个团队下所有 Agent 的成长档案汇总 */
