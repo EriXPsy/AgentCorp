@@ -123,3 +123,4 @@ update/
 # PPT 交付以 pptx 为准，PDF 由本地导出，不入仓
 方案PPT/*.pdf
 scripts/eval/squad-bench-results/
+model-service/data/style_memory/

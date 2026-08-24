@@ -8,10 +8,18 @@ SPADE Designer 路由：自适应出题 + 反思回写。
 
 每次 reflect 后，Designer 的语义理解就会更新，下次出题自动读取最新记忆。
 无需轮询、无需批处理——跟着团队成长，记忆也在成长。
+
+持久化：
+  StyleMemory 文件存储在 data/style_memory/{team_id}.json。
+  内存缓存加速频繁读写，文件存储保证跨会话保留。
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -27,19 +35,64 @@ logger = logging.getLogger("designer_route")
 router = APIRouter(prefix="/api/designer", tags=["designer"])
 
 # ---------------------------------------------------------------------------
-# 内存存储（进程内；后续可替换为 Redis/DB）
+# 持久化存储：内存缓存 + 文件存储
 # ---------------------------------------------------------------------------
+_MEMORY_DIR = Path(
+    os.environ.get(
+        "STYLE_MEMORY_DIR",
+        str(Path(__file__).resolve().parent.parent.parent / "data" / "style_memory"),
+    )
+)
 _memory_store: Dict[str, StyleMemory] = {}
+_store_lock = threading.Lock()
+
+
+def _ensure_dir() -> None:
+    """确保存储目录存在。"""
+    _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _memory_path(team_id: str) -> Path:
+    """团队 StyleMemory 的文件路径。"""
+    # 清理 team_id 中的不安全字符
+    safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in team_id)
+    return _MEMORY_DIR / f"{safe_id}.json"
 
 
 def _load_memory(team_id: str) -> Optional[StyleMemory]:
-    """读取团队的 StyleMemory；不存在返回 None。"""
-    return _memory_store.get(team_id)
+    """读取团队的 StyleMemory；先查内存缓存，再查文件。"""
+    # 内存缓存命中
+    if team_id in _memory_store:
+        return _memory_store[team_id]
+
+    # 从文件加载
+    path = _memory_path(team_id)
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            memory = StyleMemory.from_dict(data)
+            _memory_store[team_id] = memory
+            logger.debug("Loaded StyleMemory from file: %s", path)
+            return memory
+        except Exception as exc:
+            logger.warning("Failed to load StyleMemory from %s: %s", path, exc)
+
+    return None
 
 
 def _save_memory(memory: StyleMemory) -> None:
-    """持久化团队的 StyleMemory。"""
-    _memory_store[memory.team_id] = memory
+    """持久化团队的 StyleMemory（内存 + 文件）。"""
+    with _store_lock:
+        _memory_store[memory.team_id] = memory
+        _ensure_dir()
+        path = _memory_path(memory.team_id)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(memory.to_dict(), f, ensure_ascii=False, indent=2)
+            logger.debug("Saved StyleMemory to file: %s", path)
+        except Exception as exc:
+            logger.error("Failed to save StyleMemory to %s: %s", path, exc)
 
 
 def _memory_to_profile(memory: StyleMemory) -> TeamStyleProfile:
