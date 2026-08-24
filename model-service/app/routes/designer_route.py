@@ -406,3 +406,87 @@ async def get_team_agents_memory(team_id: str) -> Dict[str, Any]:
             logger.warning("Failed to read agent memory %s: %s", path, exc)
 
     return {"team_id": team_id, "agents": agents, "count": len(agents)}
+
+
+# ---------------------------------------------------------------------------
+# 团队缺口分析：自动扩招信号
+# ---------------------------------------------------------------------------
+
+class TeamGapResponse(BaseModel):
+    team_id: str
+    gaps: List[str] = Field(default_factory=list, description="识别到的能力缺口")
+    recommended_skills: List[str] = Field(default_factory=list)
+    hiring_urgency: str = "low"  # low | medium | high
+    hiring_reason: str = ""
+    team_strengths: List[str] = Field(default_factory=list)
+    team_size: int = 0
+
+
+@router.get("/team-gaps/{team_id}", response_model=TeamGapResponse)
+async def analyze_team_gaps(team_id: str) -> TeamGapResponse:
+    """分析团队能力缺口，给出扩招建议。
+
+    综合团队 StyleMemory + 所有 Agent 成长档案，识别薄弱方向。
+    如果缺口明显（如团队强于 code 但弱于 security），推荐扩招对应方向的 agent。
+    """
+    team_memory = _load_memory(team_id)
+    if team_memory is None:
+        raise HTTPException(status_code=404, detail=f"团队 {team_id} 尚无记录")
+
+    # 收集团队下所有 agent 档案
+    _AGENT_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    agent_summaries = []
+    for path in _AGENT_MEMORY_DIR.glob("*.json"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("team_id") == team_id:
+                agent_summaries.append(data)
+        except Exception:
+            pass
+
+    team_size = len(agent_summaries)
+
+    # 汇总所有 agent 的优劣势
+    all_strengths = set()
+    all_weaknesses = set()
+    for a in agent_summaries:
+        all_strengths.update(a.get("strengths", []))
+        all_weaknesses.update(a.get("weaknesses", []))
+
+    # 真正的缺口 = 弱点中没有被任何 strength 覆盖的
+    uncovered_weaknesses = all_weaknesses - all_strengths
+
+    # 从团队 understanding 中提取关键信息
+    understanding = team_memory.current_understanding or ""
+    hypothesis = team_memory.next_challenge_hypothesis or ""
+
+    # 用 LLM 做缺口分析（如果可用）
+    gaps = list(uncovered_weaknesses)
+    recommended_skills = list(uncovered_weaknesses)[:3]
+    urgency = "low"
+    reason = ""
+
+    if uncovered_weaknesses:
+        # 有明确缺口 → 分析紧急度
+        if team_size <= 2 and len(uncovered_weaknesses) >= 2:
+            urgency = "high"
+            reason = f"团队仅 {team_size} 人，却有 {len(uncovered_weaknesses)} 个方向无人覆盖：{', '.join(uncovered_weaknesses)}"
+        elif len(uncovered_weaknesses) >= 3:
+            urgency = "medium"
+            reason = f"团队有 {len(uncovered_weaknesses)} 个能力缺口待补"
+        else:
+            urgency = "low"
+            reason = f"存在小缺口：{', '.join(uncovered_weaknesses)}"
+    else:
+        reason = "团队能力覆盖均衡，暂无需扩招"
+
+    return TeamGapResponse(
+        team_id=team_id,
+        gaps=gaps,
+        recommended_skills=recommended_skills,
+        hiring_urgency=urgency,
+        hiring_reason=reason,
+        team_strengths=list(all_strengths),
+        team_size=team_size,
+    )
