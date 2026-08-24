@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Building2, User, X, Bot, Users, Loader2, ChevronDown, ChevronUp, Upload, Sparkles, Shield, Code, BarChart3, PenTool, Headphones } from 'lucide-react';
+import { Plus, Building2, User, X, Bot, Users, Loader2, Upload, Sparkles, Shield, Code, BarChart3, PenTool, Headphones, Store } from 'lucide-react';
 import { useAgentsStore } from '@/stores/agents';
 import { useTeamsStore } from '@/stores/teams';
 import { invokeIpc } from '@/lib/api-client';
@@ -144,8 +144,8 @@ export function Marketplace() {
 
   const { fetchAgents } = useAgentsStore();
   const { teams, fetchTeams } = useTeamsStore();
-  const [showUploadPanel, setShowUploadPanel] = useState(false);
-  const [showTeams, setShowTeams] = useState(false);
+  // Tab 结构：发现人才 / 我的团队 / 上传 Agent
+  const [activeTab, setActiveTab] = useState<'discover' | 'teams' | 'upload'>('discover');
 
   // —— 模块 A：市场智能匹配 store ——
   const candidates = useMarketplaceStore((s) => s.candidates);
@@ -344,244 +344,234 @@ export function Marketplace() {
         {/* GitHub 一键导入：让「新发布的开源 agent」也能公平进场 */}
         <GithubImportBar onChange={setGithubImports} />
 
-        {/* ── 上传 Agent 面板（嵌入市集，可折叠）── */}
-        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white/60">
-          <button
-            type="button"
-            onClick={() => setShowUploadPanel((v) => !v)}
-            className="flex w-full items-center justify-between px-5 py-3.5 text-left transition-colors hover:bg-[#F2F0E9]/40"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1C1E] text-white">
-                <Upload size={14} />
-              </div>
-              <div>
-                <span className="text-[13px] font-bold text-[#1A1C1E]">上传我的 Agent</span>
-                <span className="ml-2 text-[11px] text-gray-400">GitHub / 手动 / JSON · 上传后自动归队</span>
-              </div>
-            </div>
-            {showUploadPanel ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
-          </button>
-          <AnimatePresence>
-            {showUploadPanel && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.25 }}
-                className="overflow-hidden"
-              >
-                <div className="border-t border-gray-100 px-5 py-4">
-                  <Suspense fallback={<div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}>
-                    <AgentUpload />
-                  </Suspense>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+        {/* ═══ Tab 导航 ═══ */}
+        <div className="flex gap-1 rounded-full bg-[#F2F0E9] p-1">
+          {([
+            { key: 'discover' as const, label: '发现人才', icon: Store },
+            { key: 'teams' as const, label: `我的团队${teams.length > 0 ? ` (${teams.length})` : ''}`, icon: Users },
+            { key: 'upload' as const, label: '上传 Agent', icon: Upload },
+          ]).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveTab(key)}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-bold transition-all ${
+                activeTab === key
+                  ? 'bg-white text-[#1A1C1E] shadow-sm'
+                  : 'text-gray-400 hover:text-[#1A1C1E]'
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* 统一搜索区：需求 → 工种/排序 → 雇佣形态 → 高级筛选（关键词/标签/六维门槛） */}
-        <MarketSearchBar
-          keyword={searchQuery}
-          onKeywordChange={setSearchQuery}
-          activeTag={activeFilter}
-          onTagChange={setActiveFilter}
-          hireType={activeHireType}
-          onHireTypeChange={setActiveHireType}
-          teamCount={templates.filter((a) => a.hireType === 'team').length}
-          singleCount={templates.filter((a) => a.hireType === 'single').length}
-        />
-
-        {/* D · 个性化推荐透明披露：当前老板原型非中性时，明示市场排序已按该原型加权 */}
-        {personalized ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FF6B4A]/30 bg-[#FF6B4A]/5 px-3 py-2 text-[11px]">
-            <span className="font-bold text-[#1A1C1E] dark:text-white">
-              按「{activeBoss.name ?? activeBoss.id}」个性化
-            </span>
-            <span className="text-gray-400">
-              市场排序已随该老板原型强调的维度加权（同一 Agent 对不同老板匹配分不同）
-            </span>
-          </div>
-        ) : null}
-
-        {/* Agent Cards Grid */}
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 items-stretch">
-          {loadingTemplates && (
-            <div className="col-span-full flex flex-col items-center justify-center py-20">
-              <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-              <p className="mt-3 text-sm font-bold text-gray-400">加载人才市集...</p>
-            </div>
-          )}
-          {!loadingTemplates &&
-            visibleCandidates.map((candidate, i) => (
-              <MarketCandidateCard
-                key={candidate.id}
-                candidate={candidate}
-                index={i}
-                hiring={purchasing && purchasingId === candidate.id}
-                hireDisabled={purchasing && purchasingId !== candidate.id}
-                prescreening={!!prescreening[candidate.id]}
-                onHire={handleHire}
-                onPrescreen={(c) => void runPrescreen(c.id)}
-              />
-            ))}
-        </div>
-
-        {/* ── 我的团队 + 模板团队 ── */}
-        <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setShowTeams((v) => !v)}
-            className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white/60 px-5 py-3.5 text-left transition-colors hover:bg-[#F2F0E9]/40"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FFD233] text-[#1A1C1E]">
-                <Users size={14} />
-              </div>
-              <div>
-                <span className="text-[13px] font-bold text-[#1A1C1E]">团队中心</span>
-                <span className="ml-2 text-[11px] text text-gray-400">
-                  {teams.length > 0 ? `${teams.length} 个团队` : '模板团队一键雇佣'}
+        {/* ═══ Tab: 发现人才 ═══ */}
+        {activeTab === 'discover' && (
+          <div className="space-y-5">
+            <MarketSearchBar
+              keyword={searchQuery}
+              onKeywordChange={setSearchQuery}
+              activeTag={activeFilter}
+              onTagChange={setActiveFilter}
+              hireType={activeHireType}
+              onHireTypeChange={setActiveHireType}
+              teamCount={templates.filter((a) => a.hireType === 'team').length}
+              singleCount={templates.filter((a) => a.hireType === 'single').length}
+            />
+            {personalized ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FF6B4A]/30 bg-[#FF6B4A]/5 px-3 py-2 text-[11px]">
+                <span className="font-bold text-[#1A1C1E] dark:text-white">
+                  按「{activeBoss.name ?? activeBoss.id}」个性化
+                </span>
+                <span className="text-gray-400">
+                  市场排序已随该老板原型强调的维度加权
                 </span>
               </div>
+            ) : null}
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 items-stretch">
+              {loadingTemplates && (
+                <div className="col-span-full flex flex-col items-center justify-center py-20">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  <p className="mt-3 text-sm font-bold text-gray-400">加载人才市集...</p>
+                </div>
+              )}
+              {!loadingTemplates &&
+                visibleCandidates.map((candidate, i) => (
+                  <MarketCandidateCard
+                    key={candidate.id}
+                    candidate={candidate}
+                    index={i}
+                    hiring={purchasing && purchasingId === candidate.id}
+                    hireDisabled={purchasing && purchasingId !== candidate.id}
+                    prescreening={!!prescreening[candidate.id]}
+                    onHire={handleHire}
+                    onPrescreen={(c) => void runPrescreen(c.id)}
+                  />
+                ))}
             </div>
-            {showTeams ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
-          </button>
+            {!loadingTemplates && visibleCandidates.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-20">
+                <p className="text-lg font-bold text-gray-400">
+                  {t('marketplace.empty', '没有找到匹配的 Agent')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setActiveFilter('全部');
+                    setActiveHireType('全部');
+                    resetDimFilters();
+                    resetRequirement();
+                  }}
+                  className="mt-4 rounded-full bg-[#1A1C1E] px-6 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#FF6B4A]"
+                >
+                  {t('marketplace.clearFilters', '清除筛选')}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
-          <AnimatePresence>
-            {showTeams && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.25 }}
-                className="overflow-hidden"
-              >
-                <div className="space-y-5 pt-1">
-                  {/* 当前团队 */}
-                  {teams.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-400">我的团队</h3>
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        {teams.map((team) => (
-                          <div
-                            key={team.id}
-                            className="rounded-2xl border border-gray-100 bg-white/80 p-4 transition-all hover:border-[#FFD233]/50 hover:shadow-sm"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F2F0E9] text-sm">
-                                👥
+        {/* ═══ Tab: 我的团队 ═══ */}
+        {activeTab === 'teams' && (
+          <div className="space-y-8">
+            {/* 当前团队 */}
+            {teams.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-[#1A1C1E]">我的团队</h2>
+                  <span className="rounded-full bg-[#F2F0E9] px-3 py-1 text-[11px] font-bold text-gray-500">
+                    {teams.length} 个团队
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {teams.map((team) => (
+                    <div
+                      key={team.id}
+                      className="rounded-2xl border border-gray-100 bg-white/80 p-5 transition-all hover:border-[#FFD233]/50 hover:shadow-md"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F2F0E9] text-base">
+                          👥
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[14px] font-bold text-[#1A1C1E]">{team.name}</p>
+                          <p className="text-[11px] text-gray-400">
+                            {team.memberCount} 人 · Leader: {team.leaderName || '未指定'}
+                          </p>
+                        </div>
+                      </div>
+                      {team.description && (
+                        <p className="mt-2.5 text-[11px] leading-relaxed text-gray-400 line-clamp-2">
+                          {team.description}
+                        </p>
+                      )}
+                      {team.memberAvatars.length > 0 && (
+                        <div className="mt-3 flex items-center justify-between">
+                          <div className="flex -space-x-2">
+                            {team.memberAvatars.slice(0, 5).map((m) => (
+                              <div
+                                key={m.id}
+                                title={m.name}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#F2F0E9] text-[10px] font-bold text-[#1A1C1E]"
+                              >
+                                {m.name.slice(0, 1)}
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-[13px] font-bold text-[#1A1C1E]">{team.name}</p>
-                                <p className="text-[11px] text-gray-400">{team.memberCount} 人 · Leader: {team.leaderName || '未指定'}</p>
-                              </div>
-                            </div>
-                            {/* 成员头像 */}
-                            {team.memberAvatars.length > 0 && (
-                              <div className="mt-3 flex -space-x-2">
-                                {team.memberAvatars.slice(0, 5).map((m) => (
-                                  <div
-                                    key={m.id}
-                                    title={m.name}
-                                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#F2F0E9] text-[10px] font-bold text-[#1A1C1E]"
-                                  >
-                                    {m.name.slice(0, 1)}
-                                  </div>
-                                ))}
-                                {team.memberCount > 5 && (
-                                  <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-100 text-[9px] text-gray-500">
-                                    +{team.memberCount - 5}
-                                  </div>
-                                )}
+                            ))}
+                            {team.memberCount > 5 && (
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-100 text-[9px] text-gray-500">
+                                +{team.memberCount - 5}
                               </div>
                             )}
                           </div>
-                        ))}
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/team-map/${team.id}`)}
+                            className="rounded-full border border-gray-200 px-3 py-1 text-[10px] font-bold text-gray-500 transition-all hover:border-[#FFD233] hover:text-[#1A1C1E]"
+                          >
+                            查看
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 模板团队 */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-[#1A1C1E]">
+                  <Sparkles size={16} className="text-[#FFD233]" />
+                  模板团队
+                </h2>
+                <span className="text-[11px] text-gray-400">一键雇佣完整团队</span>
+              </div>
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+                {TEAM_TEMPLATES.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className="group rounded-2xl border border-gray-100 bg-white/80 p-6 transition-all hover:border-[#FFD233]/50 hover:shadow-lg"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-3xl">{tpl.emoji}</span>
+                      <div className="flex-1">
+                        <p className="text-[15px] font-bold text-[#1A1C1E]">{tpl.name}</p>
+                        <p className="mt-0.5 text-[11px] text-gray-400">{tpl.members.length} 人团队</p>
                       </div>
                     </div>
-                  )}
-
-                  {/* 模板团队 */}
-                  <div className="space-y-3">
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-400">
-                      <Sparkles size={10} className="mr-1 inline" />
-                      模板团队 · 一键雇佣
-                    </h3>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {TEAM_TEMPLATES.map((tpl) => (
-                        <div
-                          key={tpl.id}
-                          className="group rounded-2xl border border-gray-100 bg-white/80 p-5 transition-all hover:border-[#FFD233]/50 hover:shadow-md"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-2xl">{tpl.emoji}</span>
-                              <div>
-                                <p className="text-[14px] font-bold text-[#1A1C1E]">{tpl.name}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-400">{tpl.members.length} 人团队</p>
-                              </div>
-                            </div>
-                          </div>
-                          <p className="mt-2.5 text-[12px] leading-relaxed text-gray-500">{tpl.description}</p>
-                          {/* 成员构成 */}
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            {tpl.members.map((m) => (
-                              <span
-                                key={m.role}
-                                className="inline-flex items-center gap-1 rounded-full bg-[#F2F0E9] px-2.5 py-1 text-[10px] font-bold text-[#1A1C1E]"
-                              >
-                                <m.icon size={10} />
-                                {m.role}
-                              </span>
-                            ))}
-                          </div>
-                          {/* 标签 + 雇佣按钮 */}
-                          <div className="mt-3.5 flex items-center justify-between">
-                            <div className="flex gap-1">
-                              {tpl.tags.map((tag) => (
-                                <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] text-gray-500">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                            <button
-                              type="button"
-                              className="rounded-full bg-[#1A1C1E] px-4 py-1.5 text-[11px] font-bold text-white transition-all hover:bg-[#FF6B4A] group-hover:scale-105"
-                            >
-                              雇佣
-                            </button>
-                          </div>
+                    <p className="mt-3 text-[12px] leading-relaxed text-gray-500">{tpl.description}</p>
+                    <div className="mt-4 space-y-1.5">
+                      {tpl.members.map((m) => (
+                        <div key={m.role} className="flex items-center gap-2 rounded-xl bg-[#F2F0E9]/60 px-3 py-1.5">
+                          <m.icon size={12} className="text-gray-500" />
+                          <span className="text-[11px] font-bold text-[#1A1C1E]">{m.role}</span>
+                          <span className="text-[10px] text-gray-400">· {m.capability}</span>
                         </div>
                       ))}
                     </div>
+                    <div className="mt-4 flex items-center justify-between border-t border-gray-50 pt-3">
+                      <div className="flex gap-1">
+                        {tpl.tags.map((tag) => (
+                          <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] text-gray-500">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-full bg-[#1A1C1E] px-5 py-2 text-[11px] font-bold text-white transition-all hover:bg-[#FF6B4A] group-hover:scale-105"
+                      >
+                        雇佣团队
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
-        {/* Empty state */}
-        {!loadingTemplates && visibleCandidates.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <p className="text-lg font-bold text-gray-400">
-              {t('marketplace.empty', '没有找到匹配的 Agent')}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setActiveFilter('全部');
-                setActiveHireType('全部');
-                resetDimFilters();
-                resetRequirement();
-              }}
-              className="mt-4 rounded-full bg-[#1A1C1E] px-6 py-2.5 text-sm font-bold text-white shadow-xl transition-colors hover:bg-[#FF6B4A]"
-            >
-              {t('marketplace.clearFilters', '清除筛选')}
-            </button>
+        {/* ═══ Tab: 上传 Agent ═══ */}
+        {activeTab === 'upload' && (
+          <div className="mx-auto max-w-2xl">
+            <div className="rounded-2xl border border-gray-100 bg-white/80 p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1A1C1E] text-white">
+                  <Upload size={16} />
+                </div>
+                <div>
+                  <h2 className="text-[15px] font-bold text-[#1A1C1E]">上传我的 Agent</h2>
+                  <p className="text-[11px] text-gray-400">GitHub / 手动 / JSON · 上传后自动归队并触发 Designer 出题</p>
+                </div>
+              </div>
+              <Suspense fallback={<div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}>
+                <AgentUpload />
+              </Suspense>
+            </div>
           </div>
         )}
       </div>
