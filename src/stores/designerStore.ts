@@ -8,7 +8,7 @@
  * - 出题失败时优雅降级（保留旧 challenge）
  */
 import { create } from 'zustand';
-import { requestChallenge, submitReflection, loadMemory, submitAgentReflection, loadAgentMemory, fetchTeamGaps } from '@/services/designerClient';
+import { requestChallenge, submitReflection, loadMemory, submitAgentReflection, loadAgentMemory, fetchTeamGaps, fetchTeamRadar } from '@/services/designerClient';
 import type {
   AgentMemory,
   AgentReflectResponse,
@@ -16,6 +16,7 @@ import type {
   ReflectResponse,
   StyleMemory,
   TeamGapResponse,
+  TeamRadarResponse,
 } from '@/types/designer';
 
 interface DesignerState {
@@ -44,6 +45,10 @@ interface DesignerState {
   /** 已通知过的缺口 key（避免重复弹通知） */
   notifiedGapKeys: string[];
 
+  // ── 团队六维雷达 ──
+  /** 团队雷达数据 {team_id: TeamRadarResponse} */
+  teamRadars: Record<string, TeamRadarResponse>;
+
   /** 加载团队的 StyleMemory */
   fetchMemory: (teamId: string) => Promise<void>;
   /** 请求 Designer 出题 */
@@ -56,6 +61,8 @@ interface DesignerState {
   fetchAgentMemory: (agentId: string) => Promise<void>;
   /** 分析团队能力缺口（驱动主动招聘通知） */
   fetchTeamGaps: (teamId: string) => Promise<TeamGapResponse | null>;
+  /** 加载团队六维雷达数据 */
+  fetchTeamRadar: (teamId: string) => Promise<TeamRadarResponse | null>;
   /** 清空状态（切换团队时） */
   reset: () => void;
   clearError: () => void;
@@ -72,6 +79,7 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
   lastAgentReflection: null,
   teamGaps: {},
   notifiedGapKeys: [],
+  teamRadars: {},
 
   fetchMemory: async (teamId) => {
     // 已加载过同一团队则跳过
@@ -171,6 +179,20 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
     }
   },
 
+  fetchTeamRadar: async (teamId) => {
+    try {
+      const radar = await fetchTeamRadar(teamId);
+      set((state) => ({ teamRadars: { ...state.teamRadars, [teamId]: radar } }));
+      return radar;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('404') && !msg.includes('不存在')) {
+        console.warn('[designerStore] team radar fetch failed:', e);
+      }
+      return null;
+    }
+  },
+
   fetchTeamGaps: async (teamId) => {
     try {
       const gaps = await fetchTeamGaps(teamId);
@@ -212,6 +234,7 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
     lastAgentReflection: null,
     teamGaps: {},
     notifiedGapKeys: [],
+    teamRadars: {},
   }),
 
   clearError: () => set({ error: null }),

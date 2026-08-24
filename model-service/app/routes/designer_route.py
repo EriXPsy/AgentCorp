@@ -490,3 +490,81 @@ async def analyze_team_gaps(team_id: str) -> TeamGapResponse:
         team_strengths=list(all_strengths),
         team_size=team_size,
     )
+
+
+# ---------------------------------------------------------------------------
+# 团队六维雷达：聚合所有成员的 smoothed_scores
+# ---------------------------------------------------------------------------
+
+class TeamRadarResponse(BaseModel):
+    """团队六维雷达数据（移动平均，每 5 次提交更新一次）。"""
+    team_id: str
+    dimensions: List[str] = Field(default_factory=list)
+    team_scores: Dict[str, float] = Field(default_factory=dict)
+    agent_scores: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    team_size: int = 0
+    last_updated_submission: int = 0
+
+
+@router.get("/team-radar/{team_id}", response_model=TeamRadarResponse)
+async def get_team_radar(team_id: str) -> TeamRadarResponse:
+    """团队六维雷达：每个维度的团队均值 + 各成员独立分数。"""
+    _AGENT_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
+    agent_data: List[Dict] = []
+    for path in _AGENT_MEMORY_DIR.glob("*.json"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("team_id") == team_id:
+                agent_data.append(data)
+        except Exception:
+            pass
+
+    if not agent_data:
+        return TeamRadarResponse(team_id=team_id)
+
+    # 收集团队所有出现的维度
+    all_dims: set = set()
+    for a in agent_data:
+        traj = a.get("score_trajectory", {})
+        all_dims.update(traj.keys())
+
+    dimensions = sorted(all_dims)
+
+    # 各 agent 的 smoothed_scores（最近 10 次移动平均）
+    agent_scores: Dict[str, Dict[str, float]] = {}
+    dim_totals: Dict[str, List[float]] = {d: [] for d in dimensions}
+    max_submissions = 0
+
+    for a in agent_data:
+        aid = a["agent_id"]
+        traj = a.get("score_trajectory", {})
+        sub_count = a.get("submission_count", 0)
+        max_submissions = max(max_submissions, sub_count)
+
+        smoothed = {}
+        for dim in dimensions:
+            scores = traj.get(dim, [])
+            recent = scores[-10:] if len(scores) > 10 else scores
+            avg = round(sum(recent) / len(recent), 2) if recent else 0.0
+            smoothed[dim] = avg
+            if avg > 0:
+                dim_totals[dim].append(avg)
+
+        agent_scores[aid] = smoothed
+
+    # 团队均值
+    team_scores = {}
+    for dim in dimensions:
+        vals = dim_totals[dim]
+        team_scores[dim] = round(sum(vals) / len(vals), 2) if vals else 0.0
+
+    return TeamRadarResponse(
+        team_id=team_id,
+        dimensions=dimensions,
+        team_scores=team_scores,
+        agent_scores=agent_scores,
+        team_size=len(agent_data),
+        last_updated_submission=max_submissions,
+    )

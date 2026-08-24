@@ -103,6 +103,15 @@ export interface AgentReflectResponse {
   growth_summary: string;
 }
 
+export interface TeamRadarResponse {
+  team_id: string;
+  dimensions: string[];
+  team_scores: Record<string, number>;
+  agent_scores: Record<string, Record<string, number>>;
+  team_size: number;
+  last_updated_submission: number;
+}
+
 export interface TeamGapResponse {
   team_id: string;
   gaps: string[];

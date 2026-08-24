@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Bot, CalendarClock, Code, Cpu, Database, Network, UserCog, Users, Zap } from 'lucide-react';
 import { useAgentsStore } from '@/stores/agents';
+import { useDesignerStore } from '@/stores/designerStore';
 import { useTeamsStore } from '@/stores/teams';
 import { useChatStore } from '@/stores/chat';
 import { useApprovalsStore } from '@/stores/approvals';
@@ -12,6 +13,7 @@ import { deriveTeamWorkVisibility, type TeamMemberWorkVisibility } from '@/lib/t
 import { useTeamRuntime } from '@/hooks/use-team-runtime';
 import { cn } from '@/lib/utils';
 import { TeamMapHeader } from '@/components/team-map/TeamMapHeader';
+import { TeamRadar } from '@/components/team/TeamRadar';
 import { getTeamMapState } from '@/components/team-map/team-map-selectors';
 import { AddMemberSheet } from '@/components/team-map/AddMemberSheet';
 import { MemberDetailSheet } from '@/components/team-map/MemberDetailSheet';
@@ -409,6 +411,7 @@ export function TeamMap() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [radarOpen, setRadarOpen] = useState(false);
   const [lastFocusedNodeId, setLastFocusedNodeId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const [hoverCardAnchor, setHoverCardAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -430,6 +433,17 @@ export function TeamMap() {
   useEffect(() => {
     void Promise.all([fetchAgents(), fetchTeams(), fetchTasks()]);
   }, [fetchAgents, fetchTeams, fetchTasks]);
+
+  // 加载团队雷达数据
+  const teamRadars = useDesignerStore((s) => s.teamRadars);
+  const fetchTeamRadar = useDesignerStore((s) => s.fetchTeamRadar);
+  const currentRadar = teamId ? teamRadars[teamId] : null;
+
+  useEffect(() => {
+    if (teamId && radarOpen) {
+      void fetchTeamRadar(teamId);
+    }
+  }, [teamId, radarOpen, fetchTeamRadar]);
 
   const loading = agentsLoading || teamsLoading;
   const currentTeam = teams.find((team) => team.id === teamId) ?? null;
@@ -634,6 +648,48 @@ export function TeamMap() {
                 {t('teamMap.emptyTeam.title', { defaultValue: 'No members in this team yet' })}
               </div>
             </div>
+          ) : null}
+
+          {/* 团队能力雷达 */}
+          {currentTeam ? (
+            <>
+              {!radarOpen && (
+                <button
+                  type="button"
+                  onClick={() => setRadarOpen(true)}
+                  className="absolute bottom-6 right-6 z-10 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <Network className="h-4 w-4" />
+                  {t('teamMap.radar.toggle', { defaultValue: '能力雷达' })}
+                </button>
+              )}
+              {radarOpen && (
+                <div className="absolute bottom-6 right-6 z-10 w-[340px] rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <span className="text-xs font-bold text-slate-700">
+                      {t('teamMap.radar.title', { defaultValue: '团队能力雷达' })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setRadarOpen(false)}
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="p-4">
+                    {currentRadar ? (
+                      <TeamRadar data={currentRadar} />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 py-6">
+                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-transparent" />
+                        <span className="text-[10px] text-slate-400">加载雷达数据...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           ) : null}
         </div>
       </div>

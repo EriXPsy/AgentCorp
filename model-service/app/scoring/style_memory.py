@@ -596,6 +596,16 @@ class AgentMemory:
                 result[dim] = round(sum(scores) / len(scores), 2)
         return result
 
+    @property
+    def smoothed_scores(self, window: int = 10) -> Dict[str, float]:
+        """最近 N 次提交的移动平均，平滑单次波动。"""
+        result = {}
+        for dim, scores in self.score_trajectory.items():
+            recent = scores[-window:] if len(scores) > window else scores
+            if recent:
+                result[dim] = round(sum(recent) / len(recent), 2)
+        return result
+
     def to_dict(self) -> Dict:
         return {
             "agent_id": self.agent_id,

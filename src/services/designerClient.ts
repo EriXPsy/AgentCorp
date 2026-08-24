@@ -22,6 +22,7 @@ import type {
   StyleMemory,
   TeamAgentsMemory,
   TeamGapResponse,
+  TeamRadarResponse,
 } from '@/types/designer';
 
 /** 请求 Designer 出题（基于团队 StyleMemory） */
@@ -62,6 +63,14 @@ export async function loadAgentMemory(agentId: string): Promise<AgentMemory> {
   return hostApiFetch<AgentMemory>(`/api/designer/agent-memory/${encodeURIComponent(agentId)}`, {
     method: 'GET',
   });
+}
+
+/** 读取团队六维雷达数据（移动平均） */
+export async function fetchTeamRadar(teamId: string): Promise<TeamRadarResponse> {
+  return hostApiFetch<TeamRadarResponse>(
+    `/api/designer/team-radar/${encodeURIComponent(teamId)}`,
+    { method: 'GET' },
+  );
 }
 
 /** 分析团队能力缺口（用于主动招聘通知） */
