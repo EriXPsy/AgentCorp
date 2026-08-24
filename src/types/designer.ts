@@ -103,6 +103,24 @@ export interface AgentReflectResponse {
   growth_summary: string;
 }
 
+export interface PrescreenResponse {
+  radar: Record<string, number>;
+  confidence: number;
+  fit_summary: string;
+  strengths: string[];
+  risks: string[];
+  recommendation: 'hire' | 'maybe' | 'pass';
+  degraded: boolean;
+  degraded_reason: string;
+}
+
+export interface PrescreenRequest {
+  candidate_name: string;
+  candidate_description?: string;
+  candidate_capabilities?: string[];
+  team_id: string;
+}
+
 export interface TeamRadarResponse {
   team_id: string;
   dimensions: string[];

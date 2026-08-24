@@ -23,6 +23,8 @@ import type {
   TeamAgentsMemory,
   TeamGapResponse,
   TeamRadarResponse,
+  PrescreenRequest,
+  PrescreenResponse,
 } from '@/types/designer';
 
 /** 请求 Designer 出题（基于团队 StyleMemory） */
@@ -62,6 +64,14 @@ export async function submitAgentReflection(req: AgentReflectRequest): Promise<A
 export async function loadAgentMemory(agentId: string): Promise<AgentMemory> {
   return hostApiFetch<AgentMemory>(`/api/designer/agent-memory/${encodeURIComponent(agentId)}`, {
     method: 'GET',
+  });
+}
+
+/** S1 初审：Designer LLM 对候选做六维适配评分 */
+export async function requestPrescreen(req: PrescreenRequest): Promise<PrescreenResponse> {
+  return hostApiFetch<PrescreenResponse>('/api/designer/prescreen', {
+    method: 'POST',
+    body: JSON.stringify(req),
   });
 }
 

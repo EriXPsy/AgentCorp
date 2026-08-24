@@ -21,11 +21,12 @@ import type {
   TaskProfile,
   TaskRequirement,
 } from '@/types/marketplace';
+import { requestPrescreen } from '@/services/designerClient';
+import { useTeamsStore } from '@/stores/teams';
 import { RADAR_DIMS } from '@/engine/scoring/registry';
 import {
   heuristicRadar,
   parseBudgetNumber,
-  radarFromStageScore,
   radarMean,
   resolveAgentRadar,
   type HeuristicSeed,
@@ -394,35 +395,37 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
 
     set((s) => ({ prescreening: { ...s.prescreening, [candidateId]: true }, error: null }));
 
-    // 启发式种子：作为 S1 初审的客观项输入（零成本，Q5 默认方案）
+    // 启发式兜底雷达（LLM 不可用时用）
     const seedRadar: RadarScore = heuristicRadar(toHeuristicSeed(seed));
-    const objective: Record<string, number> = {};
-    for (const dim of RADAR_DIMS) objective[dim] = seedRadar[dim];
-
-    const jobType: JobType = candidate.jobType ?? get().taskProfile.jobType ?? 'code';
-    const agentId = candidate.agentId ?? `tpl:${candidate.id}`;
-
     let nextResolution = { ...candidate.radarResolution };
+
     try {
-      const stage = await useScoringStore.getState().runStage({
-        agentId,
-        stage: 'preScreen',
-        jobType,
-        objective,
-        subjective: {},
-        scoredBy: 'marketplace',
+      // 取用户第一个团队作为需求侧上下文
+      const teams = useTeamsStore.getState().teams;
+      const teamId = teams[0]?.id;
+
+      const result = await requestPrescreen({
+        candidate_name: seed.name,
+        candidate_description: seed.description,
+        candidate_capabilities: seed.capabilities ?? [],
+        team_id: teamId ?? '',
       });
-      const radar = radarFromStageScore(stage);
-      if (stage && radar) {
-        nextResolution = { radar, source: 'prescreen', confidence: 0.7 };
+
+      if (!result.degraded && Object.keys(result.radar).length > 0) {
+        // 真实初审成功：用 LLM 评分
+        nextResolution = {
+          radar: result.radar as unknown as RadarScore,
+          source: 'prescreen',
+          confidence: result.confidence,
+        };
       } else {
-        // 后端不可用/返回异常：降级启发式，保证离线可用
-        nextResolution = { radar: seedRadar, source: 'heuristic', confidence: 0.4 };
-        set({ error: 'S1 初审服务不可用，已使用启发式预估' });
+        // LLM 不可用：降级启发式
+        nextResolution = { radar: seedRadar, source: 'heuristic', confidence: 0.3 };
+        set({ error: result.degraded_reason || 'S1 初审降级为启发式' });
       }
     } catch (e) {
-      nextResolution = { radar: seedRadar, source: 'heuristic', confidence: 0.4 };
-      set({ error: e instanceof Error ? e.message : 'S1 初审失败，已使用启发式预估' });
+      nextResolution = { radar: seedRadar, source: 'heuristic', confidence: 0.3 };
+      set({ error: e instanceof Error ? e.message : 'S1 初审失败' });
     }
 
     set((s) => ({

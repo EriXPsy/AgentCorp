@@ -568,3 +568,87 @@ async def get_team_radar(team_id: str) -> TeamRadarResponse:
         team_size=len(agent_data),
         last_updated_submission=max_submissions,
     )
+
+
+# ---------------------------------------------------------------------------
+# S1 初审：候选 × 团队 快速适配评分
+# ---------------------------------------------------------------------------
+
+class PrescreenRequest(BaseModel):
+    candidate_name: str
+    candidate_description: str = ""
+    candidate_capabilities: List[str] = Field(default_factory=list)
+    team_id: str
+
+
+class PrescreenResponse(BaseModel):
+    radar: Dict[str, float] = Field(default_factory=dict)
+    confidence: float = 0.0
+    fit_summary: str = ""
+    strengths: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    recommendation: str = "maybe"  # hire | maybe | pass
+    degraded: bool = False
+    degraded_reason: str = ""
+
+
+@router.post("/prescreen", response_model=PrescreenResponse)
+async def prescreen_candidate_endpoint(req: PrescreenRequest) -> PrescreenResponse:
+    """S1 初审：用 Designer LLM 对市集候选做六维适配评分。
+
+    读取团队 StyleMemory 作为需求侧输入，与候选能力描述做比对。
+    LLM 不可用时返回 degraded=True + 空 radar，前端降级启发式。
+    """
+    from ..scoring.designer import prescreen_candidate
+
+    # 读取团队 StyleMemory
+    team_memory = _load_memory(req.team_id)
+    team_understanding = ""
+    team_weaknesses: List[str] = []
+    team_strengths: List[str] = []
+    next_hypothesis = ""
+
+    if team_memory:
+        team_understanding = team_memory.current_understanding
+        next_hypothesis = team_memory.next_challenge_hypothesis
+
+        # 从团队 performance_log 推断强弱项
+        if team_memory.performance_log:
+            dim_totals: Dict[str, List[float]] = {}
+            for entry in team_memory.performance_log:
+                for dim, score in (entry.scores or {}).items():
+                    dim_totals.setdefault(dim, []).append(score)
+            for dim, scores in dim_totals.items():
+                avg = sum(scores) / len(scores)
+                if avg >= 3.5:
+                    team_strengths.append(dim)
+                elif avg < 2.5:
+                    team_weaknesses.append(dim)
+
+    # 从 agent 档案补全团队强弱项
+    _AGENT_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    for path in _AGENT_MEMORY_DIR.glob("*.json"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("team_id") == req.team_id:
+                team_strengths.extend(data.get("strengths", []))
+                team_weaknesses.extend(data.get("weaknesses", []))
+        except Exception:
+            pass
+
+    # 去重
+    team_strengths = list(set(team_strengths))
+    team_weaknesses = list(set(team_weaknesses))
+
+    result = prescreen_candidate(
+        candidate_name=req.candidate_name,
+        candidate_description=req.candidate_description,
+        candidate_capabilities=req.candidate_capabilities,
+        team_understanding=team_understanding,
+        team_weaknesses=team_weaknesses,
+        team_strengths=team_strengths,
+        next_hypothesis=next_hypothesis,
+    )
+
+    return PrescreenResponse(**result)

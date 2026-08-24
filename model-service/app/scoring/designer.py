@@ -400,3 +400,174 @@ class DesignerEvaluator:
             primary_job_type=inp.job_type,
             declared_focus=inp.requirement or "",
         )
+
+
+# ======================================================================
+# S1 初审：候选能力 × 团队需求 快速适配评分
+# ======================================================================
+
+_PRESCREEN_SYSTEM = """\
+你是一个人才初审官。你的任务是根据候选 Agent 的能力描述和团队当前需求，
+快速评估该候选在六个维度上的适配分数。
+
+你不是在做完整的能力测试，而是在做「初步筛选」：
+- 候选声明了什么能力 → 能兑现多少？
+- 团队缺什么 → 这个候选能不能补上？
+- 候选风格跟团队搭不搭？
+
+六个维度（每个 0-5 分，0.5 步进）：
+1. task_completion（任务完成度）：候选能力与团队任务类型的匹配程度
+2. code_quality（代码质量）：候选声称的代码水平
+3. communication（沟通协作）：候选描述中体现的协作/沟通能力
+4. creativity（创造力）：候选是否展现创新思维
+5. reliability（可靠性）：候选经验的深度和一致性
+6. cost_efficiency（成本效率）：候选能力的性价比
+
+输出格式（严格 JSON，不要 markdown 代码块）：
+{
+  "radar": {"task_completion": 0-5, "code_quality": 0-5, "communication": 0-5, "creativity": 0-5, "reliability": 0-5, "cost_efficiency": 0-5},
+  "confidence": 0-1,
+  "fit_summary": "一句话总结适配度",
+  "strengths": ["强项1", "强项2"],
+  "risks": ["风险1"],
+  "recommendation": "hire" | "maybe" | "pass"
+}
+"""
+
+
+def _build_prescreen_prompt(
+    candidate_name: str,
+    candidate_description: str,
+    candidate_capabilities: List[str],
+    team_understanding: str,
+    team_weaknesses: List[str],
+    team_strengths: List[str],
+    next_hypothesis: str,
+) -> str:
+    """构建 S1 初审的 user message。"""
+    caps = "\n".join(f"- {c}" for c in candidate_capabilities) if candidate_capabilities else "（未声明具体能力）"
+
+    return f"""\
+## 候选 Agent
+- 名称：{candidate_name}
+- 描述：{candidate_description}
+- 声明能力：
+{caps}
+
+## 团队现状
+- Designer 理解：{team_understanding or '（尚无评估记录）'}
+- 团队强项：{', '.join(team_strengths) if team_strengths else '（未知）'}
+- 团队弱项：{', '.join(team_weaknesses) if team_weaknesses else '（未知）'}
+- 下一轮出题方向：{next_hypothesis or '（未设定）'}
+
+请根据以上信息，对该候选做 S1 初审打分。重点关注：候选能力能否补上团队的弱项。
+"""
+
+
+def prescreen_candidate(
+    candidate_name: str,
+    candidate_description: str,
+    candidate_capabilities: List[str],
+    team_understanding: str = "",
+    team_weaknesses: Optional[List[str]] = None,
+    team_strengths: Optional[List[str]] = None,
+    next_hypothesis: str = "",
+) -> Dict[str, Any]:
+    """S1 初审：用 Designer LLM 对候选做六维适配评分。
+
+    Returns:
+        dict with keys: radar, confidence, fit_summary, strengths, risks, recommendation
+        degraded=True 时返回空 radar + 降级原因
+    """
+    from ..judge_backend import get_backend
+
+    backend = get_backend()
+    if not backend.available:
+        return {
+            "radar": {},
+            "confidence": 0,
+            "fit_summary": "评测后端不可用",
+            "strengths": [],
+            "risks": ["LLM 后端未配置"],
+            "recommendation": "pass",
+            "degraded": True,
+            "degraded_reason": "Judge backend unavailable",
+        }
+
+    messages = [
+        {"role": "system", "content": _PRESCREEN_SYSTEM},
+        {"role": "user", "content": _build_prescreen_prompt(
+            candidate_name, candidate_description, candidate_capabilities,
+            team_understanding, team_weaknesses or [], team_strengths or [], next_hypothesis,
+        )},
+    ]
+
+    try:
+        completion: JudgeCompletion = backend.complete(
+            messages,
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        parsed = _parse_prescreen_response(completion.text)
+        if parsed:
+            return parsed
+        return {
+            "radar": {},
+            "confidence": 0,
+            "fit_summary": "初审输出解析失败",
+            "strengths": [],
+            "risks": ["LLM 输出格式异常"],
+            "recommendation": "maybe",
+            "degraded": True,
+            "degraded_reason": f"Parse failed: {completion.text[:100]}",
+        }
+    except Exception as exc:
+        return {
+            "radar": {},
+            "confidence": 0,
+            "fit_summary": f"初审异常：{exc}",
+            "strengths": [],
+            "risks": [str(exc)],
+            "recommendation": "pass",
+            "degraded": True,
+            "degraded_reason": str(exc),
+        }
+
+
+def _parse_prescreen_response(text: str) -> Optional[Dict[str, Any]]:
+    """解析初审 LLM 输出为 dict。"""
+    # 尝试提取 JSON
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        # 去掉 markdown 代码块
+        lines = cleaned.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        cleaned = "\n".join(lines)
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # 尝试正则提取 JSON 块
+        m = re.search(r'\{.*\}', cleaned, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group())
+            except json.JSONDecodeError:
+                return None
+        else:
+            return None
+
+    radar = data.get("radar", {})
+    # 确保所有值在 [0, 5]
+    for k in radar:
+        radar[k] = max(0, min(5, float(radar[k])))
+
+    return {
+        "radar": radar,
+        "confidence": float(data.get("confidence", 0.5)),
+        "fit_summary": data.get("fit_summary", ""),
+        "strengths": data.get("strengths", []),
+        "risks": data.get("risks", []),
+        "recommendation": data.get("recommendation", "maybe"),
+        "degraded": False,
+    }
