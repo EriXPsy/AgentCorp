@@ -18,7 +18,6 @@ const AgentDetail = lazy(() => import('./pages/AgentDetail').then((m) => ({ defa
 const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 const TeamOverview = lazy(() => import('./pages/TeamOverview').then((m) => ({ default: m.TeamOverview })));
 const EmployeeBuilder = lazy(() => import('./pages/EmployeeBuilder').then((m) => ({ default: m.EmployeeBuilder })));
-const AgentUpload = lazy(() => import('./components/upload/AgentUpload').then((m) => ({ default: m.AgentUpload })));
 const TeamMap = lazy(() => import('./pages/TeamMap').then((m) => ({ default: m.TeamMap })));
 const Setup = lazy(() => import('./pages/Setup').then((m) => ({ default: m.Setup })));
 const Marketplace = lazy(() => import('./pages/Marketplace').then((m) => ({ default: m.Marketplace })));
@@ -237,7 +236,6 @@ function App() {
             <Route path="agents/:agentId" element={<AgentDetail />} />
             <Route path="team-overview" element={<TeamOverview />} />
             <Route path="employee-builder" element={<EmployeeBuilder />} />
-            <Route path="agent-upload" element={<AgentUpload />} />
             <Route path="team-builder" element={<TeamBuilder />} />
             <Route path="team-map/:teamId" element={<TeamMap />} />
             <Route path="team-map" element={<Navigate to="/team-overview" replace />} />

@@ -14,7 +14,6 @@ import {
   Settings as SettingsIcon,
   Store,
   Swords,
-  Upload,
   Users,
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -165,12 +164,6 @@ export function Sidebar() {
       label: tSidebar('marketplace', 'Marketplace'),
       path: '/marketplace',
       icon: Store,
-    },
-    // Agent 上传：GitHub / 手动 / JSON 三种方式，上传后自动归队 + Designer 出题
-    {
-      label: tSidebar('agentUpload', '上传 Agent'),
-      path: '/agent-upload',
-      icon: Upload,
     },
     {
       label: tSidebar('humanAssets', 'Human Assets'),

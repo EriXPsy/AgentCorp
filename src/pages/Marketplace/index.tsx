@@ -1,14 +1,17 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Building2, User, X, Bot, Users, Loader2 } from 'lucide-react';
+import { Plus, Building2, User, X, Bot, Users, Loader2, ChevronDown, ChevronUp, Upload, Sparkles, Shield, Code, BarChart3, PenTool, Headphones } from 'lucide-react';
 import { useAgentsStore } from '@/stores/agents';
 import { useTeamsStore } from '@/stores/teams';
 import { invokeIpc } from '@/lib/api-client';
 import { isBrowserPreviewMode } from '@/lib/browser-preview';
 import { getPreviewMarketplaceTemplates } from '@/lib/office-preview-seed';
+
+// Agent 上传面板（嵌入市集，不作为独立页面）
+const AgentUpload = lazy(() => import('@/components/upload/AgentUpload').then((m) => ({ default: m.AgentUpload })));
 // —— 模块 A 增量：智能匹配（六维解析 + matchScore 排序 + S1 初审）——
 import {
   useMarketplaceStore,
@@ -67,6 +70,60 @@ type HireTeamResponse = {
 
 const HIRE_TYPES: HireType[] = ['雇佣团队', '雇佣员工'];
 
+// ── 模板团队定义 ──────────────────────────────────────────────────
+interface TeamTemplate {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  members: { role: string; capability: string; icon: typeof Code }[];
+  tags: string[];
+  hireType: 'team';
+}
+
+const TEAM_TEMPLATES: TeamTemplate[] = [
+  {
+    id: 'tpl-fullstack-squad',
+    name: '全栈开发小队',
+    emoji: '⚡',
+    description: '前后端通吃的敏捷团队，适合从 0 到 1 快速搭建产品',
+    members: [
+      { role: '架构师', capability: '系统设计、技术选型', icon: Code },
+      { role: '前端工程师', capability: 'React/Vue、UI 实现', icon: PenTool },
+      { role: '后端工程师', capability: 'API 设计、数据库', icon: Code },
+      { role: '测试工程师', capability: '自动化测试、QA', icon: Shield },
+    ],
+    tags: ['全栈', '敏捷', 'MVP'],
+    hireType: 'team',
+  },
+  {
+    id: 'tpl-data-team',
+    name: '数据分析团队',
+    emoji: '📊',
+    description: '数据采集到可视化一条龙，让数据驱动决策',
+    members: [
+      { role: '数据工程师', capability: 'ETL、数据管道', icon: Code },
+      { role: '分析师', capability: '统计分析、报表', icon: BarChart3 },
+      { role: '可视化专家', capability: '图表、Dashboard', icon: PenTool },
+    ],
+    tags: ['数据', '分析', '可视化'],
+    hireType: 'team',
+  },
+  {
+    id: 'tpl-content-studio',
+    name: '内容创作工作室',
+    emoji: '✍️',
+    description: '文案+设计+运营的全能内容团队',
+    members: [
+      { role: '文案策划', capability: '文案、创意、脚本', icon: PenTool },
+      { role: '设计师', capability: '视觉设计、排版', icon: PenTool },
+      { role: '运营专家', capability: '增长策略、用户运营', icon: Headphones },
+    ],
+    tags: ['内容', '创意', '运营'],
+    hireType: 'team',
+  },
+];
+
 export function Marketplace() {
   const { t } = useTranslation('common');
   const navigate = useNavigate();
@@ -86,7 +143,9 @@ export function Marketplace() {
   const [loadingTemplates, setLoadingTemplates] = useState(true);
 
   const { fetchAgents } = useAgentsStore();
-  const { fetchTeams } = useTeamsStore();
+  const { teams, fetchTeams } = useTeamsStore();
+  const [showUploadPanel, setShowUploadPanel] = useState(false);
+  const [showTeams, setShowTeams] = useState(false);
 
   // —— 模块 A：市场智能匹配 store ——
   const candidates = useMarketplaceStore((s) => s.candidates);
@@ -107,6 +166,8 @@ export function Marketplace() {
   const personalized = activeBoss.id !== 'neutral';
 
   // Fetch real templates from bundled resources
+  useEffect(() => { void fetchTeams(); }, [fetchTeams]);
+
   useEffect(() => {
     async function loadTemplates() {
       try {
@@ -283,6 +344,43 @@ export function Marketplace() {
         {/* GitHub 一键导入：让「新发布的开源 agent」也能公平进场 */}
         <GithubImportBar onChange={setGithubImports} />
 
+        {/* ── 上传 Agent 面板（嵌入市集，可折叠）── */}
+        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white/60">
+          <button
+            type="button"
+            onClick={() => setShowUploadPanel((v) => !v)}
+            className="flex w-full items-center justify-between px-5 py-3.5 text-left transition-colors hover:bg-[#F2F0E9]/40"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1C1E] text-white">
+                <Upload size={14} />
+              </div>
+              <div>
+                <span className="text-[13px] font-bold text-[#1A1C1E]">上传我的 Agent</span>
+                <span className="ml-2 text-[11px] text-gray-400">GitHub / 手动 / JSON · 上传后自动归队</span>
+              </div>
+            </div>
+            {showUploadPanel ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+          </button>
+          <AnimatePresence>
+            {showUploadPanel && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className="overflow-hidden"
+              >
+                <div className="border-t border-gray-100 px-5 py-4">
+                  <Suspense fallback={<div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}>
+                    <AgentUpload />
+                  </Suspense>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
         {/* 统一搜索区：需求 → 工种/排序 → 雇佣形态 → 高级筛选（关键词/标签/六维门槛） */}
         <MarketSearchBar
           keyword={searchQuery}
@@ -328,6 +426,141 @@ export function Marketplace() {
                 onPrescreen={(c) => void runPrescreen(c.id)}
               />
             ))}
+        </div>
+
+        {/* ── 我的团队 + 模板团队 ── */}
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setShowTeams((v) => !v)}
+            className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white/60 px-5 py-3.5 text-left transition-colors hover:bg-[#F2F0E9]/40"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FFD233] text-[#1A1C1E]">
+                <Users size={14} />
+              </div>
+              <div>
+                <span className="text-[13px] font-bold text-[#1A1C1E]">团队中心</span>
+                <span className="ml-2 text-[11px] text text-gray-400">
+                  {teams.length > 0 ? `${teams.length} 个团队` : '模板团队一键雇佣'}
+                </span>
+              </div>
+            </div>
+            {showTeams ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+          </button>
+
+          <AnimatePresence>
+            {showTeams && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-5 pt-1">
+                  {/* 当前团队 */}
+                  {teams.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-400">我的团队</h3>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        {teams.map((team) => (
+                          <div
+                            key={team.id}
+                            className="rounded-2xl border border-gray-100 bg-white/80 p-4 transition-all hover:border-[#FFD233]/50 hover:shadow-sm"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F2F0E9] text-sm">
+                                👥
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-bold text-[#1A1C1E]">{team.name}</p>
+                                <p className="text-[11px] text-gray-400">{team.memberCount} 人 · Leader: {team.leaderName || '未指定'}</p>
+                              </div>
+                            </div>
+                            {/* 成员头像 */}
+                            {team.memberAvatars.length > 0 && (
+                              <div className="mt-3 flex -space-x-2">
+                                {team.memberAvatars.slice(0, 5).map((m) => (
+                                  <div
+                                    key={m.id}
+                                    title={m.name}
+                                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#F2F0E9] text-[10px] font-bold text-[#1A1C1E]"
+                                  >
+                                    {m.name.slice(0, 1)}
+                                  </div>
+                                ))}
+                                {team.memberCount > 5 && (
+                                  <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-100 text-[9px] text-gray-500">
+                                    +{team.memberCount - 5}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 模板团队 */}
+                  <div className="space-y-3">
+                    <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-400">
+                      <Sparkles size={10} className="mr-1 inline" />
+                      模板团队 · 一键雇佣
+                    </h3>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                      {TEAM_TEMPLATES.map((tpl) => (
+                        <div
+                          key={tpl.id}
+                          className="group rounded-2xl border border-gray-100 bg-white/80 p-5 transition-all hover:border-[#FFD233]/50 hover:shadow-md"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-2xl">{tpl.emoji}</span>
+                              <div>
+                                <p className="text-[14px] font-bold text-[#1A1C1E]">{tpl.name}</p>
+                                <p className="mt-0.5 text-[11px] text-gray-400">{tpl.members.length} 人团队</p>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="mt-2.5 text-[12px] leading-relaxed text-gray-500">{tpl.description}</p>
+                          {/* 成员构成 */}
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {tpl.members.map((m) => (
+                              <span
+                                key={m.role}
+                                className="inline-flex items-center gap-1 rounded-full bg-[#F2F0E9] px-2.5 py-1 text-[10px] font-bold text-[#1A1C1E]"
+                              >
+                                <m.icon size={10} />
+                                {m.role}
+                              </span>
+                            ))}
+                          </div>
+                          {/* 标签 + 雇佣按钮 */}
+                          <div className="mt-3.5 flex items-center justify-between">
+                            <div className="flex gap-1">
+                              {tpl.tags.map((tag) => (
+                                <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] text-gray-500">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              className="rounded-full bg-[#1A1C1E] px-4 py-1.5 text-[11px] font-bold text-white transition-all hover:bg-[#FF6B4A] group-hover:scale-105"
+                            >
+                              雇佣
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Empty state */}
