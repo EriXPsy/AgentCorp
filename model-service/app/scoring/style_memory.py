@@ -522,6 +522,225 @@ class Reflector:
 
 
 # ---------------------------------------------------------------------------
+# Agent-level growth memory
+# ---------------------------------------------------------------------------
+
+AGENT_REFLECTION_SYSTEM_PROMPT = (
+    "You are an expert at analyzing individual AI agent performance and growth.\n"
+    "You observe one agent's answer to a challenge and reflect on their individual\n"
+    "coding style, strengths, weaknesses, and improvement trajectory.\n"
+    "Be specific and evidence-based — cite actual patterns from the code."
+)
+
+AGENT_REFLECTION_USER_TEMPLATE = """\
+Agent identity: {agent_id} (team: {team_id})
+Prior observations about this agent:
+{prior_observations}
+
+The task they attempted:
+--- TASK ---
+{task_prompt}
+-----------
+
+Their submission:
+--- ANSWER ---
+{answer}
+------------
+
+Scores (JSON): {scores}
+Outcome: {outcome}
+
+Write a 2-3 sentence observation about THIS AGENT's individual style:
+  a) Patterns unique to this agent (vs what you'd expect from the team).
+  b) Skills demonstrated or lacking in this specific submission.
+  c) Growth signals — are they improving, plateauing, or regressing?
+
+Do not restate scores. Do not praise generically. Return only the observation.
+"""
+
+
+@dataclass
+class AgentMemory:
+    """Semantic memory of one agent's individual growth within a team.
+
+    Lighter than team StyleMemory — no synthesis or prompt evolution,
+    because individual agents have fewer samples and the team Designer
+    drives challenge design. This captures the agent's personal trajectory.
+    """
+
+    agent_id: str
+    team_id: str = ""
+    observations: List[str] = field(default_factory=list)
+    performance_log: List[Dict] = field(default_factory=list)
+    submission_count: int = 0
+    pass_count: int = 0
+    #: 维度分数轨迹 {dim: [score1, score2, ...]}
+    score_trajectory: Dict[str, List[float]] = field(default_factory=dict)
+    #: 综合成长描述（每 5 次反思刷新一次）
+    growth_summary: str = ""
+    #: 专长方向（从高分维度推断）
+    strengths: List[str] = field(default_factory=list)
+    #: 薄弱方向（从低分维度推断）
+    weaknesses: List[str] = field(default_factory=list)
+
+    @property
+    def pass_rate(self) -> float:
+        return self.pass_count / max(1, self.submission_count)
+
+    @property
+    def avg_scores(self) -> Dict[str, float]:
+        """每个维度的平均分。"""
+        result = {}
+        for dim, scores in self.score_trajectory.items():
+            if scores:
+                result[dim] = round(sum(scores) / len(scores), 2)
+        return result
+
+    def to_dict(self) -> Dict:
+        return {
+            "agent_id": self.agent_id,
+            "team_id": self.team_id,
+            "observations": list(self.observations),
+            "performance_log": list(self.performance_log),
+            "submission_count": self.submission_count,
+            "pass_count": self.pass_count,
+            "score_trajectory": {k: list(v) for k, v in self.score_trajectory.items()},
+            "growth_summary": self.growth_summary,
+            "strengths": list(self.strengths),
+            "weaknesses": list(self.weaknesses),
+            "pass_rate": self.pass_rate,
+            "avg_scores": self.avg_scores,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "AgentMemory":
+        return cls(
+            agent_id=data["agent_id"],
+            team_id=data.get("team_id", ""),
+            observations=list(data.get("observations", [])),
+            performance_log=list(data.get("performance_log", [])),
+            submission_count=int(data.get("submission_count", 0)),
+            pass_count=int(data.get("pass_count", 0)),
+            score_trajectory={k: list(v) for k, v in data.get("score_trajectory", {}).items()},
+            growth_summary=data.get("growth_summary", ""),
+            strengths=list(data.get("strengths", [])),
+            weaknesses=list(data.get("weaknesses", [])),
+        )
+
+
+class AgentReflector:
+    """Drives individual agent growth reflection.
+
+    Simpler than team Reflector — no synthesis or prompt evolution.
+    Just: observe → record → update trajectory.
+    """
+
+    def __init__(self, temperature: float = 0.3, max_tokens: int = 512):
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+    def reflect(
+        self,
+        agent_id: str,
+        team_id: str,
+        task_prompt: str,
+        answer: str,
+        scores: Dict,
+        outcome: str,
+        memory: AgentMemory,
+        timestamp: Optional[str] = None,
+    ) -> AgentMemory:
+        """Reflect on one agent's submission and update their memory."""
+        # 更新性能日志和分数轨迹
+        memory.submission_count += 1
+        if outcome == "passed":
+            memory.pass_count += 1
+
+        if isinstance(scores, dict):
+            for dim, score in scores.items():
+                if dim not in memory.score_trajectory:
+                    memory.score_trajectory[dim] = []
+                memory.score_trajectory[dim].append(float(score))
+
+        memory.performance_log.append({
+            "task_id": task_prompt[:60],  # 截取前 60 字符作为 ID
+            "outcome": outcome,
+            "scores": dict(scores) if isinstance(scores, dict) else scores,
+            "timestamp": timestamp,
+        })
+
+        # LLM 反思
+        try:
+            prior = "\n".join(
+                f"{i+1}. {obs}" for i, obs in enumerate(memory.observations[-5:])
+            ) if memory.observations else "(first submission)"
+
+            raw = self._call_llm(
+                AGENT_REFLECTION_USER_TEMPLATE.format(
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    prior_observations=prior,
+                    task_prompt=task_prompt,
+                    answer=answer,
+                    scores=json.dumps(scores, ensure_ascii=False),
+                    outcome=outcome,
+                ),
+            )
+            observation = self._parse(raw)
+            if observation:
+                memory.observations.append(observation)
+        except JudgeUnavailable:
+            logger.debug("Judge unavailable for agent %s reflection", agent_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Agent reflection failed for %s", agent_id)
+
+        # 每 5 次反思更新优劣势推断
+        if memory.submission_count % 5 == 0:
+            self._update_strengths_weaknesses(memory)
+
+        return memory
+
+    def _call_llm(self, user: str) -> str:
+        backend = get_backend()
+        messages = [
+            {"role": "system", "content": AGENT_REFLECTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ]
+        completion = backend.complete(
+            messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        text = getattr(completion, "text", None)
+        if text is None and isinstance(completion, dict):
+            text = completion.get("text") or completion.get("content")
+        return text or ""
+
+    @staticmethod
+    def _parse(text: str) -> str:
+        """复用 Reflector 的清洗逻辑。"""
+        return Reflector._parse_reflection(text)
+
+    @staticmethod
+    def _update_strengths_weaknesses(memory: AgentMemory) -> None:
+        """从分数轨迹推断专长和薄弱方向。"""
+        avgs = memory.avg_scores
+        if not avgs:
+            return
+        sorted_dims = sorted(avgs.items(), key=lambda x: x[1], reverse=True)
+        memory.strengths = [d for d, s in sorted_dims[:3] if s >= 3.5]
+        memory.weaknesses = [d for d, s in sorted_dims[-3:] if s < 3.0]
+        # 生成简短成长总结
+        recent_obs = memory.observations[-3:]
+        memory.growth_summary = (
+            f"Agent {memory.agent_id}: {memory.submission_count} submissions, "
+            f"{memory.pass_rate:.0%} pass rate. "
+            f"Strong in: {', '.join(memory.strengths) or 'none yet'}. "
+            f"Weak in: {', '.join(memory.weaknesses) or 'none yet'}."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
 

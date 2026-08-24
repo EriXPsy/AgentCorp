@@ -8,8 +8,10 @@
  * - 出题失败时优雅降级（保留旧 challenge）
  */
 import { create } from 'zustand';
-import { requestChallenge, submitReflection, loadMemory } from '@/services/designerClient';
+import { requestChallenge, submitReflection, loadMemory, submitAgentReflection, loadAgentMemory } from '@/services/designerClient';
 import type {
+  AgentMemory,
+  AgentReflectResponse,
   ChallengeResponse,
   ReflectResponse,
   StyleMemory,
@@ -29,12 +31,22 @@ interface DesignerState {
   /** 错误信息 */
   error: string | null;
 
+  // ── Agent 级别成长追踪 ──
+  /** 已加载的 Agent 成长档案 {agent_id: AgentMemory} */
+  agentMemories: Record<string, AgentMemory>;
+  /** 最近一次 Agent 反思结果 */
+  lastAgentReflection: AgentReflectResponse | null;
+
   /** 加载团队的 StyleMemory */
   fetchMemory: (teamId: string) => Promise<void>;
   /** 请求 Designer 出题 */
   requestChallenge: (teamId: string, opts?: { jobType?: string; description?: string; memberCount?: number }) => Promise<ChallengeResponse | null>;
-  /** 评估后触发反思 */
+  /** 评估后触发团队反思 */
   reflect: (teamId: string, taskId: string, answer: string, scores: Record<string, number>, outcome: string) => Promise<ReflectResponse | null>;
+  /** 评估后触发 Agent 个人反思 */
+  reflectAgent: (agentId: string, teamId: string, taskId: string, answer: string, scores: Record<string, number>, outcome: string) => Promise<AgentReflectResponse | null>;
+  /** 加载单个 Agent 成长档案 */
+  fetchAgentMemory: (agentId: string) => Promise<void>;
   /** 清空状态（切换团队时） */
   reset: () => void;
   clearError: () => void;
@@ -47,6 +59,8 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
   lastReflection: null,
   loading: false,
   error: null,
+  agentMemories: {},
+  lastAgentReflection: null,
 
   fetchMemory: async (teamId) => {
     // 已加载过同一团队则跳过
@@ -106,6 +120,61 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
     }
   },
 
+  reflectAgent: async (agentId, teamId, taskId, answer, scores, outcome) => {
+    try {
+      const result = await submitAgentReflection({
+        agent_id: agentId,
+        team_id: teamId,
+        task_id: taskId,
+        answer,
+        scores,
+        outcome,
+      });
+      set((state) => ({
+        lastAgentReflection: result,
+        agentMemories: {
+          ...state.agentMemories,
+          [agentId]: {
+            ...(state.agentMemories[agentId] ?? {} as AgentMemory),
+            agent_id: agentId,
+            team_id: teamId,
+            submission_count: result.submission_count,
+            pass_rate: result.pass_rate,
+            strengths: result.strengths,
+            weaknesses: result.weaknesses,
+            growth_summary: result.growth_summary,
+            observations: [
+              ...(state.agentMemories[agentId]?.observations ?? []),
+              result.observation,
+            ],
+            performance_log: state.agentMemories[agentId]?.performance_log ?? [],
+            score_trajectory: state.agentMemories[agentId]?.score_trajectory ?? {},
+            avg_scores: {},
+          } as AgentMemory,
+        },
+      }));
+      return result;
+    } catch (e) {
+      console.warn('[designerStore] agent reflection failed:', e);
+      return null;
+    }
+  },
+
+  fetchAgentMemory: async (agentId) => {
+    try {
+      const memory = await loadAgentMemory(agentId);
+      set((state) => ({
+        agentMemories: { ...state.agentMemories, [agentId]: memory },
+      }));
+    } catch (e) {
+      // 404 = 该 agent 尚无档案，正常初始状态
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('404') && !msg.includes('不存在')) {
+        console.warn('[designerStore] load agent memory failed:', e);
+      }
+    }
+  },
+
   reset: () => set({
     memory: null,
     teamId: null,
@@ -113,6 +182,8 @@ export const useDesignerStore = create<DesignerState>((set, get) => ({
     lastReflection: null,
     loading: false,
     error: null,
+    agentMemories: {},
+    lastAgentReflection: null,
   }),
 
   clearError: () => set({ error: null }),

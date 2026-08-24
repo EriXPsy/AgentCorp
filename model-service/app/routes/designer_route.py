@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from ..judge_backend import JudgeUnavailable
 from ..scoring.designer import design_challenge
 from ..scoring.team_style import TeamStyleProfile, build_initial_profile
-from ..scoring.style_memory import Reflector, StyleMemory
+from ..scoring.style_memory import AgentMemory, AgentReflector, Reflector, StyleMemory
 
 logger = logging.getLogger("designer_route")
 
@@ -95,6 +95,48 @@ def _save_memory(memory: StyleMemory) -> None:
             logger.error("Failed to save StyleMemory to %s: %s", path, exc)
 
 
+# ---------------------------------------------------------------------------
+# Agent 级别持久化（独立于团队）
+# ---------------------------------------------------------------------------
+
+_AGENT_MEMORY_DIR = _MEMORY_DIR / "agents"
+_agent_memory_store: Dict[str, "AgentMemory"] = {}
+_agent_store_lock = threading.Lock()
+
+
+def _agent_memory_path(agent_id: str) -> Path:
+    safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in agent_id)
+    return _AGENT_MEMORY_DIR / f"{safe_id}.json"
+
+
+def _load_agent_memory(agent_id: str) -> Optional["AgentMemory"]:
+    if agent_id in _agent_memory_store:
+        return _agent_memory_store[agent_id]
+    path = _agent_memory_path(agent_id)
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            memory = AgentMemory.from_dict(data)
+            _agent_memory_store[agent_id] = memory
+            return memory
+        except Exception as exc:
+            logger.warning("Failed to load AgentMemory from %s: %s", path, exc)
+    return None
+
+
+def _save_agent_memory(memory: "AgentMemory") -> None:
+    with _agent_store_lock:
+        _agent_memory_store[memory.agent_id] = memory
+        _AGENT_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        path = _agent_memory_path(memory.agent_id)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(memory.to_dict(), f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.error("Failed to save AgentMemory to %s: %s", path, exc)
+
+
 def _memory_to_profile(memory: StyleMemory) -> TeamStyleProfile:
     """从 StyleMemory 构建 minimal TeamStyleProfile，供 Designer 出题用。
 
@@ -153,6 +195,27 @@ class ReflectResponse(BaseModel):
     reflection_count: int = Field(..., description="累计反思次数")
     current_understanding: str = Field(..., description="当前综合理解")
     next_hypothesis: str = Field(..., description="Designer 认为下一步该挑战什么")
+
+
+# ── Agent 级别请求/响应模型 ──────────────────────────────────────────
+
+class AgentReflectRequest(BaseModel):
+    agent_id: str = Field(..., description="Agent ID")
+    team_id: str = Field(..., description="所属团队 ID")
+    task_id: str = Field(..., description="任务 ID")
+    answer: str = Field(..., description="Agent 提交的代码")
+    scores: Dict[str, float] = Field(default_factory=dict)
+    outcome: str = Field("unknown")
+
+
+class AgentReflectResponse(BaseModel):
+    agent_id: str
+    observation: str
+    submission_count: int
+    pass_rate: float
+    strengths: List[str]
+    weaknesses: List[str]
+    growth_summary: str
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +326,83 @@ async def get_memory(team_id: str) -> Dict[str, Any]:
             detail=f"团队 {team_id} 的 StyleMemory 不存在",
         )
     return memory.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Agent 级别路由：个人成长追踪
+# ---------------------------------------------------------------------------
+
+@router.post("/agent-reflect", response_model=AgentReflectResponse)
+async def reflect_on_agent(req: AgentReflectRequest) -> AgentReflectResponse:
+    """对单个 Agent 的提交进行反思，更新其个人成长档案。
+
+    与团队反思不同：只记录个体观察和分数轨迹，不做 synthesis/prompt 进化。
+    """
+    memory = _load_agent_memory(req.agent_id)
+    if memory is None:
+        memory = AgentMemory(agent_id=req.agent_id, team_id=req.team_id)
+
+    reflector = AgentReflector()
+    updated = reflector.reflect(
+        agent_id=req.agent_id,
+        team_id=req.team_id,
+        task_prompt=req.task_id,
+        answer=req.answer,
+        scores=req.scores,
+        outcome=req.outcome,
+        memory=memory,
+    )
+    _save_agent_memory(updated)
+
+    latest_obs = updated.observations[-1] if updated.observations else ""
+
+    logger.info(
+        "Agent 反思: agent=%s team=%s submissions=%d pass_rate=%.0f%%",
+        req.agent_id, req.team_id, updated.submission_count, updated.pass_rate * 100,
+    )
+
+    return AgentReflectResponse(
+        agent_id=req.agent_id,
+        observation=latest_obs,
+        submission_count=updated.submission_count,
+        pass_rate=round(updated.pass_rate, 3),
+        strengths=updated.strengths,
+        weaknesses=updated.weaknesses,
+        growth_summary=updated.growth_summary,
+    )
+
+
+@router.get("/agent-memory/{agent_id}")
+async def get_agent_memory(agent_id: str) -> Dict[str, Any]:
+    """查看单个 Agent 的成长档案。"""
+    memory = _load_agent_memory(agent_id)
+    if memory is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent {agent_id} 的成长档案不存在",
+        )
+    return memory.to_dict()
+
+
+@router.get("/agent-memory/team/{team_id}")
+async def get_team_agents_memory(team_id: str) -> Dict[str, Any]:
+    """查看一个团队下所有 Agent 的成长档案汇总。"""
+    _AGENT_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    agents = {}
+    for path in _AGENT_MEMORY_DIR.glob("*.json"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("team_id") == team_id:
+                agent_id = data["agent_id"]
+                agents[agent_id] = {
+                    "submission_count": data.get("submission_count", 0),
+                    "pass_rate": data.get("pass_rate", 0),
+                    "strengths": data.get("strengths", []),
+                    "weaknesses": data.get("weaknesses", []),
+                    "growth_summary": data.get("growth_summary", ""),
+                }
+        except Exception as exc:
+            logger.warning("Failed to read agent memory %s: %s", path, exc)
+
+    return {"team_id": team_id, "agents": agents, "count": len(agents)}

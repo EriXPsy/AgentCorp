@@ -66,3 +66,51 @@ export interface ReflectResponse {
   current_understanding: string;
   next_hypothesis: string;
 }
+
+// ── Agent 级别成长档案 ─────────────────────────────────────────────
+
+export interface AgentMemory {
+  agent_id: string;
+  team_id: string;
+  observations: string[];
+  performance_log: PerformanceEntry[];
+  submission_count: number;
+  pass_count: number;
+  score_trajectory: Record<string, number[]>;
+  growth_summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  pass_rate: number;
+  avg_scores: Record<string, number>;
+}
+
+export interface AgentReflectRequest {
+  agent_id: string;
+  team_id: string;
+  task_id: string;
+  answer: string;
+  scores: Record<string, number>;
+  outcome: string;
+}
+
+export interface AgentReflectResponse {
+  agent_id: string;
+  observation: string;
+  submission_count: number;
+  pass_rate: number;
+  strengths: string[];
+  weaknesses: string[];
+  growth_summary: string;
+}
+
+export interface TeamAgentsMemory {
+  team_id: string;
+  agents: Record<string, {
+    submission_count: number;
+    pass_rate: number;
+    strengths: string[];
+    weaknesses: string[];
+    growth_summary: string;
+  }>;
+  count: number;
+}
