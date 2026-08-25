@@ -113,6 +113,8 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
     scan_payload = None
 
     # 先跑 sandbox（经 registry dispatch，自动获得遥测 + 维度校验）
+    gold_out = None
+    gold_scores: dict = {}
     if req.verify and task.job_type == "code":
         from ..sandbox import scan_python_answer, security_evidence_for
 
@@ -129,6 +131,23 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
         scan_result = scan_python_answer(answer)
         scan_payload = scan_result.to_dict()
         verified_evidence.update(security_evidence_for(task.id, scan_result))
+
+        # 金标准校准（GoldReference）：对 code 工种按 gold 正确性客观打分，
+        # 复用 sandbox runner 跑同一道金标准夹具，结果覆盖 LLM 对该维的主观分。
+        try:
+            gold_out = get_registry().dispatch("gold_reference", EvaluatorInput(
+                agent_id=req.task_id,
+                job_type="code",
+                task_id=task.id,
+                answer=answer,
+            ))
+            gold_scores = dict(gold_out.scores or {})
+            if gold_out.verified_evidence:
+                verified_evidence.update(gold_out.verified_evidence)
+        except Exception as exc:  # noqa: BLE001 —— 校准失败不阻断主评分流程
+            logger.warning("gold_reference 校准失败，降级跳过：%s", exc)
+            gold_out = None
+            gold_scores = {}
 
     elif req.verify and task.job_type in ("text", "image") and task.text_spec:
         # 文本/多模态工种：无沙箱可跑，用确定性结构校验提供机器证据。
@@ -156,10 +175,14 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
 
     # 从 EvaluatorOutput 重建响应（保持 API 兼容）
     j_meta = craft_out.metadata or {}
+    # 金标准校准覆盖：对机器可验维度用客观 gold 分替换 LLM 主观分
+    dims = dict(craft_out.scores or {})
+    for _d, _v in (gold_scores or {}).items():
+        dims[_d] = _v
     return {
         "task_id": req.task_id,
         "job_type": j_meta.get("jobType", task.job_type),
-        "dims": craft_out.scores,
+        "dims": dims,
         "unscored_dims": j_meta.get("unscoredDims", []),
         "checkpoints": [
             {"checkpoint": k, "hit": True, "quote": v}
@@ -176,6 +199,18 @@ async def api_craft_judge(req: CraftJudgeRequest) -> dict:
         "verified_evidence": verified_evidence,
         "sandbox": sandbox_payload,
         "security_scan": scan_payload,
+        "gold_calibration": (
+            None
+            if gold_out is None
+            else {
+                "evaluator_id": gold_out.evaluator_id,
+                "scores": gold_scores,
+                "outcome": (gold_out.metadata or {}).get("outcome"),
+                "total": (gold_out.metadata or {}).get("total"),
+                "passed": (gold_out.metadata or {}).get("passed"),
+                "passRate": (gold_out.metadata or {}).get("passRate"),
+            }
+        ),
     }
 
 
