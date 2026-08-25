@@ -54,7 +54,9 @@ import {
   computeCoverage,
   coverageRatio,
   recommendationOf,
+  recommendationTrace,
   suggestFollowups,
+  shouldTerminateFollowup,
   DEFAULT_FOLLOWUP_BUDGET,
   type DimCoverage,
   type FollowupSuggestion,
@@ -431,8 +433,12 @@ export const useInterviewStore = create<InterviewState>((set, get) => ({
     const askedQIds = [...new Set([...state.askedQIds, baseQId, question.qId])];
     const targetDims = planTargetDims(state.plan);
     const coverage = computeCoverage(turns, targetDims);
-    // P1#6：追问建议接入预算封顶，预算耗尽自动停发。
-    const suggestions = suggestFollowups(turns, targetDims, { budget: DEFAULT_FOLLOWUP_BUDGET });
+    // P1#6：追问建议接入预算封顶；#8 修复：覆盖度/置信度达标即自适应终止，避免无效追问。
+    const suggestions = shouldTerminateFollowup(turns, targetDims, {
+      confidence: state.judgeConfidence ?? undefined,
+    })
+      ? []
+      : suggestFollowups(turns, targetDims, { budget: DEFAULT_FOLLOWUP_BUDGET });
     // 题序按「已答 ∪ 已跳过」为已消耗，跳过过的题不再重问。
     const consumed = [...new Set([...askedQIds, ...state.skippedQIds])];
 
@@ -495,8 +501,12 @@ export const useInterviewStore = create<InterviewState>((set, get) => ({
     );
     const targetDims = planTargetDims(state.plan);
     const coverage = computeCoverage(turns, targetDims);
-    // P1#6：打分后重算追问建议，同样受预算封顶约束。
-    const suggestions = suggestFollowups(turns, targetDims, { budget: DEFAULT_FOLLOWUP_BUDGET });
+    // P1#6：打分后重算追问建议，受预算封顶约束；#8 修复：覆盖度/置信度达标即停。
+    const suggestions = shouldTerminateFollowup(turns, targetDims, {
+      confidence: state.judgeConfidence ?? undefined,
+    })
+      ? []
+      : suggestFollowups(turns, targetDims, { budget: DEFAULT_FOLLOWUP_BUDGET });
     set({ turns, coverage, suggestions });
   },
 
@@ -832,6 +842,8 @@ export const useInterviewStore = create<InterviewState>((set, get) => ({
       recommendation:
         opts?.recommendation ??
         recommendationOf(stageScoreTotal, finalRadar, metrics.coverageRatio),
+      // #9 修复：阈值决策可追溯，挂载到报告供上岗后绩效闭环校验
+      ...recommendationTrace(stageScoreTotal, finalRadar, metrics.coverageRatio),
       notes: opts?.notes,
       userQuestionRound: state.userQuestionRound ?? undefined,
       createdBy: state.createdBy,

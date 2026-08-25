@@ -116,10 +116,13 @@ export function evidenceStrength(reply: string): number {
   if (text.length === 0) return 0;
 
   let score = 0;
-  // 长度分（最多 0.4）
+  // 长度分（最多 0.4）：奖励「适中篇幅」，但过长(>300字)视为啰嗦略降，
+  // 以对抗 verbosity 偏差——裁判 rubric 本就「只看质量不看长度」，
+  // 回退启发式不应与之相反（修复缺陷：裁判失效时信号反转、奖励啰嗦）。
   if (text.length >= 20) score += 0.15;
   if (text.length >= 80) score += 0.15;
-  if (text.length >= 200) score += 0.1;
+  if (text.length >= 200 && text.length <= 300) score += 0.1;
+  if (text.length > 300) score -= 0.05;
   // 结构化分（最多 0.2）
   if (/(\n|^)\s*(\d+[.、)]|[-*·])/.test(text)) score += 0.12;
   if (text.split('\n').filter((line) => line.trim().length > 0).length >= 3) score += 0.08;
@@ -438,4 +441,59 @@ export function recommendationOf(
     return 'reject';
   }
   return 'hold';
+}
+
+/**
+ * #9 修复（可追溯版）：把阈值决策抽成可追踪结构，供面试报告挂载，
+ * 与上岗后绩效做闭环校验（验证「面试承诺 vs 实际」）。
+ * 注意：原 patch 把未使用变量留在 recommendationOf 内 → 死代码 + lint 失败；
+ * 此处改为独立纯函数，由 interview_store 调用并挂载到报告。
+ * 原内部阶段代号「S3 上岗绩效」已中性化为「上岗后绩效闭环」。
+ */
+export function recommendationTrace(
+  stageScoreTotal: number | null,
+  finalRadar: RadarScore | null,
+  ratio: number,
+): { thresholdDecision: string; loopTag: string } {
+  let thresholdDecision: string;
+  if (typeof stageScoreTotal === 'number') {
+    if (stageScoreTotal >= 75) thresholdDecision = 'hire_75';
+    else if (stageScoreTotal >= 55) thresholdDecision = 'hold_55';
+    else thresholdDecision = 'reject_sub55';
+  } else if (finalRadar) {
+    const mean = RADAR_DIMS.reduce((acc, dim) => acc + finalRadar[dim], 0) / RADAR_DIMS.length;
+    if (mean >= 4 && ratio >= 0.6) thresholdDecision = 'hire_mean4';
+    else if (mean >= 2.5) thresholdDecision = 'hold_mean2.5';
+    else thresholdDecision = 'reject_mean2.5';
+  } else {
+    thresholdDecision = 'hold_default';
+  }
+  const loopTag = `threshold:${thresholdDecision}:postHireLoop_pending`;
+  return { thresholdDecision, loopTag };
+}
+
+/**
+ * 自适应终止判定（缺陷 #8 修复）：在「预算封顶」之外，增加「置信度/覆盖度达标即停」的
+ * 严谨终止条件，避免固定追问 2 次造成的无效追问或收敛不足。
+ * - coverageRatio 已达阈值（默认 0.9）→ 已收敛，停；
+ * - 模型裁判置信度达标（默认 ≥0.8）且覆盖度 ≥0.6 → 信号充分，停；
+ * - 否则交由预算逻辑裁决。
+ */
+export function shouldTerminateFollowup(
+  turns: InterviewTurn[],
+  targetDims: (RadarDim | CraftDim)[],
+  opts: { coverageThreshold?: number; confidence?: number; confidenceThreshold?: number } = {},
+): boolean {
+  const coverageThreshold = opts.coverageThreshold ?? 0.9;
+  const confidenceThreshold = opts.confidenceThreshold ?? 0.8;
+  const ratio = coverageRatio(computeCoverage(turns, targetDims));
+  if (ratio >= coverageThreshold) return true;
+  if (
+    typeof opts.confidence === 'number' &&
+    ratio >= 0.6 &&
+    opts.confidence >= confidenceThreshold
+  ) {
+    return true;
+  }
+  return false;
 }

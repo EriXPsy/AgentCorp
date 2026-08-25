@@ -167,6 +167,10 @@ export interface InterviewReport {
   convergenceRunId?: string;
   /** HR 结论 */
   recommendation: InterviewRecommendation;
+  /** 阈值决策可追溯（#9 修复）：hire/hold/reject 的判定依据，供上岗后绩效闭环回流校验 */
+  thresholdDecision?: string;
+  /** 闭环标签（与上岗后绩效对比，验证「面试承诺 vs 实际」），中性化为 postHireLoop */
+  loopTag?: string;
   /** HR 总评备注 */
   notes?: string;
   /** 用户自定义题（可选独立小节，复用 Arena 通道；不进 turns/dimTracker/模型分） */

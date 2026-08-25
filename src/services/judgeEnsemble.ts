@@ -50,6 +50,12 @@ export interface JudgeEnsembleOptions {
    * 空/缺省 → 无状态评估（既有行为）。
    */
   history?: string[] | null;
+  /**
+   * D · 面试阶段个性化漂移检测（修复缺陷 #6）：透传当前激活老板的 StyleMemory 给 judgeChat，
+   * 使裁判在前缀看到 agent 跨老板的风格基线，能标注「本次风格相对基线漂移」。
+   * 与 Evaluation 层 StyleMemoryPanel 同源数据；跨老板漂移的*最终判定*由调用方用多 boss 原型跑对比得出。
+   */
+  styleMemory?: string | null;
 }
 
 /**
@@ -175,9 +181,19 @@ export async function judgeChatEnsemble(
 
   for (let i = 0; i < k; i += 1) {
     // 每次重复用不同的 rubricVariant 旋转维度顺序，平均掉维度排列偏差（自洽扰动）
-    const res = await judgeChat(agentId, transcript, opts?.persona, opts?.history, i).catch(
-      () => null,
-    );
+    // 跨家族轮转：若 opts.models 提供且后端支持 model 覆盖，按 i%len 轮转；
+    // 当前后端未暴露 model 字段，variantModel 仅作审计记录，不强制改采样
+    // （注意：绝不能把 string 当第 6 参传给 traceCtx，否则 tsc 失败）。
+    // styleMemory 作为第 7 参透传给 judgeChat，驱动跨老板漂移检测。
+    const res = await judgeChat(
+      agentId,
+      transcript,
+      opts?.persona,
+      opts?.history,
+      i,
+      undefined,
+      opts?.styleMemory,
+    ).catch(() => null);
     if (!res || !res.radar) continue;
     radars.push(res.radar);
     if (res.verdict) verdicts.push(res.verdict);

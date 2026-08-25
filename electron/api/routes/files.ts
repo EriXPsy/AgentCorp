@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { dialog, nativeImage } from 'electron';
 import crypto from 'node:crypto';
-import { extname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { extname, join, resolve, sep } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
 
@@ -53,6 +53,31 @@ function mimeToExt(mimeType: string): string {
   return '';
 }
 
+/**
+ * 路径白名单：仅允许读取/暂存位于用户主目录、应用工作目录或系统临时目录内的文件，
+ * 防止 stage-paths / thumbnails 对任意路径做 copyFile / stat（本地文件读取越权）。
+ * 如需放开其他目录，在此 roots 中追加即可。
+ */
+function isAllowedPath(inputPath: string): boolean {
+  try {
+    const abs = resolve(inputPath);
+    const roots = [homedir(), process.cwd(), tmpdir()];
+    return roots.some((root) => {
+      const r = resolve(root);
+      return abs === r || abs.startsWith(r + sep);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** 路径净化：不合法/越权路径返回 null，调用方须跳过该文件。 */
+function sanitizeFilePath(inputPath: string): string | null {
+  if (typeof inputPath !== 'string' || inputPath.length === 0) return null;
+  if (!isAllowedPath(inputPath)) return null;
+  return inputPath;
+}
+
 const OUTBOUND_DIR = join(homedir(), '.openclaw', 'media', 'outbound');
 
 async function generateImagePreview(filePath: string, mimeType: string): Promise<string | null> {
@@ -88,13 +113,26 @@ export async function handleFileRoutes(
       await fsP.mkdir(OUTBOUND_DIR, { recursive: true });
       const results = [];
       for (const filePath of body.filePaths) {
+        const safePath = sanitizeFilePath(filePath);
+        if (!safePath) {
+          results.push({
+            id: '',
+            fileName: filePath.split(/[\\/]/).pop() || 'file',
+            mimeType: '',
+            fileSize: 0,
+            stagedPath: '',
+            preview: null,
+            error: 'path_not_allowed',
+          });
+          continue;
+        }
         const id = crypto.randomUUID();
-        const ext = extname(filePath);
+        const ext = extname(safePath);
         const stagedPath = join(OUTBOUND_DIR, `${id}${ext}`);
-        await fsP.copyFile(filePath, stagedPath);
+        await fsP.copyFile(safePath, stagedPath);
         const s = await fsP.stat(stagedPath);
         const mimeType = getMimeType(ext);
-        const fileName = filePath.split(/[\\/]/).pop() || 'file';
+        const fileName = safePath.split(/[\\/]/).pop() || 'file';
         const preview = mimeType.startsWith('image/')
           ? await generateImagePreview(stagedPath, mimeType)
           : null;
@@ -139,16 +177,21 @@ export async function handleFileRoutes(
     try {
       const body = await parseJsonBody<{ paths: Array<{ filePath: string; mimeType: string }> }>(req);
       const fsP = await import('node:fs/promises');
-      const results: Record<string, { preview: string | null; fileSize: number }> = {};
+      const results: Record<string, { preview: string | null; fileSize: number; error?: string }> = {};
       for (const { filePath, mimeType } of body.paths) {
+        const safePath = sanitizeFilePath(filePath);
+        if (!safePath) {
+          results[filePath] = { preview: null, fileSize: 0, error: 'path_not_allowed' };
+          continue;
+        }
         try {
-          const s = await fsP.stat(filePath);
+          const s = await fsP.stat(safePath);
           const preview = mimeType.startsWith('image/')
-            ? await generateImagePreview(filePath, mimeType)
+            ? await generateImagePreview(safePath, mimeType)
             : null;
-          results[filePath] = { preview, fileSize: s.size };
+          results[safePath] = { preview, fileSize: s.size };
         } catch {
-          results[filePath] = { preview: null, fileSize: 0 };
+          results[safePath] = { preview: null, fileSize: 0 };
         }
       }
       sendJson(res, 200, results);

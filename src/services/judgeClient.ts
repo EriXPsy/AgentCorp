@@ -628,6 +628,21 @@ export function buildHistoryPreamble(history: string[] | null | undefined): stri
 }
 
 /**
+ * D · 构建候选风格基线前缀（跨老板漂移检测，纯函数可单测）。
+ * 把 agent 在「其他老板原型下」累积的风格基线注入裁判上下文，使裁判能评估
+ * 本次回答风格相对该基线是否漂移（表述习惯 / 语气 / 结构一致性）——即「看人下菜」检测。
+ * 与 Evaluation 层 StyleMemoryPanel 同源数据；跨老板漂移的*最终判定*由调用方用多 boss
+ * 原型跑对比得出（本函数只负责把基线送进裁判上下文，不做跨老板比较）。
+ */
+export function buildStylePreamble(styleMemory: string): string {
+  return [
+    '【候选风格基线（跨老板）】',
+    styleMemory,
+    '请评估本次回答风格相对该基线是否漂移（表述习惯 / 语气 / 结构一致性）。',
+  ].join('\n');
+}
+
+/**
  * C · 抗偏差评分准则前言（纯函数，可单测）。
  *
  * LLM-as-judge 存在位置/冗长/自我增强/权威等系统偏差（见 MT-Bench 2306.05685、
@@ -730,14 +745,16 @@ export async function judgeChat(
   history?: string[] | null,
   rubricVariant = 0,
   traceCtx?: { correlationId?: string; runId?: string },
+  styleMemory?: string | null,
 ): Promise<ChatJudgeResult | null> {
   const runId = traceCtx?.runId ?? `judge-${agentId}-${Date.now()}`;
   const correlationId = traceCtx?.correlationId ?? runId;
   try {
     const personaPre = buildPersonaPreamble(persona);
     const historyPre = buildHistoryPreamble(history);
+    const stylePre = styleMemory ? buildStylePreamble(styleMemory) : '';
     const rubricPre = buildJudgeRubricPreamble(rubricVariant);
-    const preambles = [personaPre, historyPre, rubricPre].filter(Boolean).join('\n\n');
+    const preambles = [personaPre, historyPre, stylePre, rubricPre].filter(Boolean).join('\n\n');
     const fullTranscript = preambles ? `${preambles}\n\n${transcript}` : transcript;
     return await withTrace(
       { runId, correlationId, agentId, kind: 'judge', name: 'chat-judge' },
