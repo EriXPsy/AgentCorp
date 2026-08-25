@@ -762,13 +762,13 @@ export function TeamOverview() {
 
   const handleRowClick = (asset: HumanAsset) => {
     if (asset.type === 'team') {
-      navigate(`/team-map/${asset.id}`);
+      navigate(`/team-space/${asset.id}`);
     }
   };
 
   const handleViewProfile = (asset: HumanAsset) => {
     if (asset.type === 'team') {
-      navigate(`/team-map/${asset.id}`);
+      navigate(`/team-space/${asset.id}`);
     } else {
       navigate(`/agents/${asset.id}`);
     }

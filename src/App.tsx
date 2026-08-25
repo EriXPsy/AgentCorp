@@ -22,6 +22,7 @@ const TeamMap = lazy(() => import('./pages/TeamMap').then((m) => ({ default: m.T
 const Setup = lazy(() => import('./pages/Setup').then((m) => ({ default: m.Setup })));
 const Marketplace = lazy(() => import('./pages/Marketplace').then((m) => ({ default: m.Marketplace })));
 const TeamBuilder = lazy(() => import('./pages/TeamBuilder').then((m) => ({ default: m.TeamBuilder })));
+const TeamSpace = lazy(() => import('./pages/TeamSpace').then((m) => ({ default: m.TeamSpace })));
 const Evaluation = lazy(() => import('./pages/Evaluation').then((m) => ({ default: m.Evaluation })));
 const Interview = lazy(() => import('./pages/Interview').then((m) => ({ default: m.Interview })));
 // 模块 Arena：个性化对决（需求 → 同工种候选作答 → 双轨 Elo）
@@ -235,6 +236,7 @@ function App() {
             <Route path="team-overview" element={<TeamOverview />} />
             <Route path="employee-builder" element={<EmployeeBuilder />} />
             <Route path="team-builder" element={<TeamBuilder />} />
+            <Route path="team-space/:teamId" element={<TeamSpace />} />
             <Route path="team-map/:teamId" element={<TeamMap />} />
             <Route path="team-map" element={<Navigate to="/team-overview" replace />} />
             <Route path="marketplace" element={<Marketplace />} />
