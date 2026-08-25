@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Union
 
+import anyio
+
 from .evaluator_protocol import (
     Evaluator,
     EvaluatorHealth,
@@ -156,9 +158,12 @@ class JudgeRegistry:
             if hasattr(ev, "aevaluate") and callable(getattr(ev, "aevaluate")):
                 out = await ev.aevaluate(inp)  # type: ignore[attr-defined]
             else:
-                out = await asyncio.get_event_loop().run_in_executor(
-                    None, ev.evaluate, inp
-                )
+                # 用 anyio.to_thread.run_sync() 把同步 Evaluator 丢进线程池：
+                # - 后端无关——不管底层是 asyncio 还是 trio（pytest-anyio 默认 trio）
+                #   都不依赖「当前有 asyncio loop」，避免 get_event_loop()/get_running_loop()
+                #   在 trio 下抛 RuntimeError；
+                # - anyio 已是 FastAPI/Starlette 的传递依赖，零新增依赖。
+                out = await anyio.to_thread.run_sync(ev.evaluate, inp)
             stats.calls += 1
             stats.last_call_ts = t0
             return out
