@@ -36,7 +36,10 @@ function read(p: string): string {
 }
 
 describe("M3b 主干契约 · 静态不可绕过", () => {
-  const files = walk(SRC);
+  // Windows 路径分隔符是反斜杠，而本测试所有 endsWith/includes/正则都按正斜杠写。
+  // 不归一化的话，scoring/registry.ts 会被误判为"第二处声明"、roleCard.ts 找不到、
+  // /engine/ 过滤在 Windows 上空跑假通过。统一转正斜杠，让契约在两条平台上都真正生效。
+  const files = walk(SRC).map((p) => p.replace(/\\/g, "/"));
 
   it("单一规则源：除 scoring/registry.ts 外不得声明 RADAR_DIMS", () => {
     const violators = files.filter(
