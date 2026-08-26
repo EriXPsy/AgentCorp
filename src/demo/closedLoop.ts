@@ -133,7 +133,7 @@ export interface ClosedLoopResult {
 const verdictLabel: Record<Verdict, string> = {
   MVP: 'MVP（可留用）',
   OBSERVE: '待观察',
-  FIRED: 'You are fired',
+  FIRED: 'Not recommended',
 };
 const phaseLabel: Record<ClosedLoopPhase, string> = {
   input: '任务输入',

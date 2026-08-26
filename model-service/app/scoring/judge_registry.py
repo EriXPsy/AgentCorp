@@ -25,8 +25,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Union
 
+import anyio
+
 from .evaluator_protocol import (
     Evaluator,
+    EvaluatorHealth,
     EvaluatorInput,
     EvaluatorOutput,
     allowed_dims_for,
@@ -155,9 +158,12 @@ class JudgeRegistry:
             if hasattr(ev, "aevaluate") and callable(getattr(ev, "aevaluate")):
                 out = await ev.aevaluate(inp)  # type: ignore[attr-defined]
             else:
-                out = await asyncio.get_event_loop().run_in_executor(
-                    None, ev.evaluate, inp
-                )
+                # 用 anyio.to_thread.run_sync() 把同步 Evaluator 丢进线程池：
+                # - 后端无关——不管底层是 asyncio 还是 trio（pytest-anyio 默认 trio）
+                #   都不依赖「当前有 asyncio loop」，避免 get_event_loop()/get_running_loop()
+                #   在 trio 下抛 RuntimeError；
+                # - anyio 已是 FastAPI/Starlette 的传递依赖，零新增依赖。
+                out = await anyio.to_thread.run_sync(ev.evaluate, inp)
             stats.calls += 1
             stats.last_call_ts = t0
             return out
@@ -180,6 +186,34 @@ class JudgeRegistry:
             }
             for eid, s in self._stats.items()
         }
+
+    def health(self) -> Dict[str, Any]:
+        """聚合所有 Evaluator 的健康状态（供 /api/registry/status 展示）。
+
+        Evaluator 若实现 health() 则用之，否则默认 healthy。
+        返回 {evaluator_id: {status, reason}} + 顶层 overall。
+        """
+        per: Dict[str, Dict[str, str]] = {}
+        worst = "healthy"
+        for eid, ev in self._evaluators.items():
+            h: EvaluatorHealth
+            if hasattr(ev, "health") and callable(getattr(ev, "health")):
+                try:
+                    h = ev.health()
+                except Exception as exc:  # noqa: BLE001 —— 健康自报自身不应拖垮注册表
+                    h = EvaluatorHealth(
+                        evaluator_id=eid,
+                        status="unavailable",
+                        reason=f"health() 自报异常：{exc}",
+                    )
+            else:
+                h = EvaluatorHealth(evaluator_id=eid, status="healthy")
+            per[eid] = {"status": h.status, "reason": h.reason}
+            if h.status == "unavailable":
+                worst = "unavailable"
+            elif h.status == "degraded" and worst == "healthy":
+                worst = "degraded"
+        return {"overall": worst, "evaluators": per}
 
     def dispatch_chain(
         self,

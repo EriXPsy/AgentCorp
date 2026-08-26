@@ -5,7 +5,16 @@
 set -u
 
 PATTERN='陈思丞|C:/Users|/c/Users|\.workbuddy|\.trae|/Users/|/home/'
-TARGETS=("src/demo" "docs/artifacts" "docs/review")
+TARGETS=(
+  "README.md"
+  "package.json"
+  "index.html"
+  "electron-builder.yml"
+  "src"
+  "electron"
+  "model-service/app"
+  "docs"
+)
 if [ "$#" -gt 0 ]; then
   TARGETS=("$@")
 fi
@@ -16,7 +25,7 @@ for t in "${TARGETS[@]}"; do
     echo "privacy-grep: 警告——目标不存在，跳过: ${t}" >&2
     continue
   fi
-  grep -rEn "$PATTERN" "$t"
+  grep -rEn --binary-files=without-match "$PATTERN" "$t"
   rc=$?
   if [ "$rc" -eq 1 ]; then
     : # 无命中

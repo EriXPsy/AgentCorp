@@ -99,7 +99,7 @@ async function listAgentCronRelations(agentId: string, ctx: HostApiContext) {
     return [{
       job: transformCronJob(job),
       relationReason,
-      deepLink: `/cron?jobId=${encodeURIComponent(job.id)}&agentId=${encodeURIComponent(agentId)}&tab=pipelines`,
+      deepLink: `/team-overview`,
     }];
   });
 

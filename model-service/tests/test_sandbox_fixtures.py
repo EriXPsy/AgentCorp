@@ -361,10 +361,191 @@ def test_set_operations_missing_entrypoint():
 
 
 # ======================================================================
+# 6. code_regex_extract —— 正则提取邮箱/URL/日期
+# ======================================================================
+_GOOD_REGEX_EXTRACT = (
+    "import re\n"
+    "\n"
+    "def extract_entities(text):\n"
+    "    emails = []\n"
+    "    for m in re.finditer(r'[\\w.+-]+@[\\w-]+\\.[\\w.-]+', text):\n"
+    "        email = m.group()\n"
+    "        if '@' in email and '.' in email.split('@')[1]:\n"
+    "            emails.append(email)\n"
+    "    urls = re.findall(r'https?://\\S+', text)\n"
+    "    dates = re.findall(r'\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}:\\d{2})?', text)\n"
+    "    return {'emails': emails, 'urls': urls, 'dates': dates}\n"
+)
+
+_BAD_REGEX_EXTRACT = '''\
+def extract_entities(text):
+    """错误实现：把任何包含 @ 或 http 的片段都当作实体提取。"""
+    return {"emails": ["user@"], "urls": ["htp://broken"], "dates": []}
+'''
+
+_NO_ENTRY_REGEX = '''\
+def unrelated():
+    return {}
+'''
+
+
+def test_regex_extract_correct_passes():
+    """正确实现过夹具 → passed + verified_evidence。"""
+    result = run_python_answer(_GOOD_REGEX_EXTRACT, task_id="code_regex_extract")
+    assert result.outcome == "passed", f"expected passed, got {result.outcome}: {result.cases}"
+    assert result.passed >= 8, f"expected >= 8 passed, got {result.passed}: {result.cases}"
+    assert "code_runnability" in verified_evidence_for("code_regex_extract", result)
+
+
+def test_regex_extract_wrong_fails():
+    """提取了无效实体的实现过夹具 → failed。"""
+    result = run_python_answer(_BAD_REGEX_EXTRACT, task_id="code_regex_extract")
+    assert result.outcome == "failed"
+    assert result.failed >= 1
+    assert verified_evidence_for("code_regex_extract", result) == {}
+
+
+def test_regex_extract_missing_entrypoint():
+    """缺 extract_entities 入口函数 → failed。"""
+    result = run_python_answer(_NO_ENTRY_REGEX, task_id="code_regex_extract")
+    assert result.outcome == "failed"
+    assert verified_evidence_for("code_regex_extract", result) == {}
+
+
+# ======================================================================
+# 7. code_data_validate —— 数据校验
+# ======================================================================
+_GOOD_DATA_VALIDATE = '''\
+import re
+
+def validate_record(record):
+    """校验记录字段，返回 {field: error_message} dict。"""
+    errors = {}
+
+    # name：非空字符串
+    name = record.get("name")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        errors["name"] = "名称不能为空"
+
+    # email：必须包含 @ 和 .
+    email = record.get("email")
+    if email is not None:
+        if not isinstance(email, str) or "@" not in email or "." not in email.split("@")[-1]:
+            errors["email"] = "邮箱格式无效"
+
+    # age：0-150 的整数
+    age = record.get("age")
+    if age is not None:
+        if not isinstance(age, int) or isinstance(age, bool) or age < 0 or age > 150:
+            errors["age"] = "年龄必须在 0-150 之间"
+
+    # url：必须以 http:// 或 https:// 开头
+    url = record.get("url")
+    if url is not None:
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            errors["url"] = "URL 格式无效（需以 http:// 或 https:// 开头）"
+
+    return errors
+'''
+
+_BAD_DATA_VALIDATE = '''\
+def validate_record(record):
+    """错误实现：永远返回空 dict（不校验任何字段）。"""
+    return {}
+'''
+
+_NO_ENTRY_VALIDATE = '''\
+def unrelated():
+    return {}
+'''
+
+
+def test_data_validate_correct_passes():
+    """正确实现过夹具 → passed + verified_evidence。"""
+    result = run_python_answer(_GOOD_DATA_VALIDATE, task_id="code_data_validate")
+    assert result.outcome == "passed", f"expected passed, got {result.outcome}: {result.cases}"
+    assert result.passed >= 8, f"expected >= 8 passed, got {result.passed}: {result.cases}"
+    assert "code_runnability" in verified_evidence_for("code_data_validate", result)
+
+
+def test_data_validate_wrong_fails():
+    """不校验任何字段的实现过夹具 → failed。"""
+    result = run_python_answer(_BAD_DATA_VALIDATE, task_id="code_data_validate")
+    assert result.outcome == "failed"
+    assert result.failed >= 1
+    assert verified_evidence_for("code_data_validate", result) == {}
+
+
+def test_data_validate_missing_entrypoint():
+    """缺 validate_record 入口函数 → failed。"""
+    result = run_python_answer(_NO_ENTRY_VALIDATE, task_id="code_data_validate")
+    assert result.outcome == "failed"
+    assert verified_evidence_for("code_data_validate", result) == {}
+
+
+# ======================================================================
+# 8. code_config_merge —— 多层配置合并
+# ======================================================================
+_GOOD_CONFIG_MERGE = '''\
+import copy
+
+def deep_merge(base, override):
+    """深合并两个字典：嵌套 dict 递归合并，其他类型后者覆盖前者。不修改原字典。"""
+    result = copy.deepcopy(base)
+    for key, val in override.items():
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(val, dict)
+        ):
+            result[key] = deep_merge(result[key], val)
+        else:
+            result[key] = copy.deepcopy(val)
+    return result
+'''
+
+_BAD_CONFIG_MERGE = '''\
+def deep_merge(base, override):
+    """错误实现：浅合并（覆盖而非递归）。"""
+    result = dict(base)
+    result.update(override)
+    return result
+'''
+
+_NO_ENTRY_MERGE = '''\
+def unrelated():
+    return {}
+'''
+
+
+def test_config_merge_correct_passes():
+    """正确实现过夹具 → passed + verified_evidence。"""
+    result = run_python_answer(_GOOD_CONFIG_MERGE, task_id="code_config_merge")
+    assert result.outcome == "passed", f"expected passed, got {result.outcome}: {result.cases}"
+    assert result.passed >= 7, f"expected >= 7 passed, got {result.passed}: {result.cases}"
+    assert "code_runnability" in verified_evidence_for("code_config_merge", result)
+
+
+def test_config_merge_wrong_fails():
+    """浅合并的实现过夹具 → failed（嵌套 dict 被覆盖而非递归合并）。"""
+    result = run_python_answer(_BAD_CONFIG_MERGE, task_id="code_config_merge")
+    assert result.outcome == "failed"
+    assert result.failed >= 1
+    assert verified_evidence_for("code_config_merge", result) == {}
+
+
+def test_config_merge_missing_entrypoint():
+    """缺 deep_merge 入口函数 → failed。"""
+    result = run_python_answer(_NO_ENTRY_MERGE, task_id="code_config_merge")
+    assert result.outcome == "failed"
+    assert verified_evidence_for("code_config_merge", result) == {}
+
+
+# ======================================================================
 # 注册表完整性
 # ======================================================================
 def test_all_new_specs_registered():
-    """5 道新题都已注册到 _SANDBOX_SPECS。"""
+    """8 道新题都已注册到 _SANDBOX_SPECS。"""
     from app.sandbox.craft_tasks_sandbox import _SANDBOX_SPECS
     expected_ids = {
         "code_json_transform",
@@ -372,6 +553,9 @@ def test_all_new_specs_registered():
         "code_log_parse",
         "code_word_frequency",
         "code_set_operations",
+        "code_regex_extract",
+        "code_data_validate",
+        "code_config_merge",
     }
     assert expected_ids.issubset(set(_SANDBOX_SPECS.keys())), (
         f"missing specs: {expected_ids - set(_SANDBOX_SPECS.keys())}"

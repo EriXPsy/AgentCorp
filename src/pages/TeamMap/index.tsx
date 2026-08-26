@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Bot, CalendarClock, Code, Cpu, Database, Network, UserCog, Users, Zap } from 'lucide-react';
 import { useAgentsStore } from '@/stores/agents';
+import { useDesignerStore } from '@/stores/designerStore';
 import { useTeamsStore } from '@/stores/teams';
 import { useChatStore } from '@/stores/chat';
 import { useApprovalsStore } from '@/stores/approvals';
@@ -12,11 +13,19 @@ import { deriveTeamWorkVisibility, type TeamMemberWorkVisibility } from '@/lib/t
 import { useTeamRuntime } from '@/hooks/use-team-runtime';
 import { cn } from '@/lib/utils';
 import { TeamMapHeader } from '@/components/team-map/TeamMapHeader';
+import { TeamRadar } from '@/components/team/TeamRadar';
 import { getTeamMapState } from '@/components/team-map/team-map-selectors';
 import { AddMemberSheet } from '@/components/team-map/AddMemberSheet';
 import { MemberDetailSheet } from '@/components/team-map/MemberDetailSheet';
 import { TeamMapHoverCard } from '@/components/team-map/team-map-hover-card';
 import { TeamScheduleSheet } from '@/components/team-map/TeamScheduleSheet';
+import {
+  buildTeamMapHoverAnchor,
+  deriveTeamMemberNextStep,
+  fallbackTeamMemberVisibility,
+  getChildTeamAgents,
+  getTeamMemberOwnedEntryPoints,
+} from '@/services/team/team-map';
 
 const AVATAR_COLORS = [
   'bg-blue-100 text-blue-600 ring-1 ring-blue-500/20',
@@ -28,7 +37,6 @@ const AVATAR_COLORS = [
 ];
 
 const AVATAR_ICONS = [Bot, UserCog, Code, Database, Zap, Cpu];
-const RECENT_MS = 5 * 60 * 1000;
 
 function agentColor(idx: number) {
   return AVATAR_COLORS[idx % AVATAR_COLORS.length];
@@ -39,39 +47,12 @@ function AgentIcon({ idx, className }: { idx: number; className?: string }) {
   return <Icon className={className} />;
 }
 
-function isRecentlyActive(ts: number | undefined): boolean {
-  return !!ts && Date.now() - ts < RECENT_MS;
-}
-
 function getTeamRole(agent: AgentSummary): 'leader' | 'worker' {
   return agent.teamRole ?? (agent.isDefault ? 'leader' : 'worker');
 }
 
 function getChatAccess(agent: AgentSummary): 'direct' | 'leader_only' {
   return agent.chatAccess ?? 'direct';
-}
-
-function deriveNextStep(statusKey: TeamMemberWorkVisibility['statusKey'], agentName: string): string {
-  switch (statusKey) {
-    case 'blocked':
-      return `Unblock ${agentName}`;
-    case 'waiting_approval':
-      return `Review approval for ${agentName}`;
-    case 'working':
-      return `Track ${agentName}'s execution`;
-    case 'active':
-      return `Check the latest update from ${agentName}`;
-    default:
-      return `Queue the next work item for ${agentName}`;
-  }
-}
-
-function getOwnedEntryPoints(
-  agent: AgentSummary,
-  channelOwners: Record<string, string>,
-  configuredChannelTypes: string[],
-): string[] {
-  return configuredChannelTypes.filter((channelType) => channelOwners[channelType] === agent.id);
 }
 
 function TeamNotFoundState() {
@@ -317,14 +298,6 @@ function ConnectorLines({ childCount }: { childCount: number }) {
   );
 }
 
-function getChildAgents(agent: AgentSummary, agents: AgentSummary[], rootId: string) {
-  return agents.filter((candidate) => {
-    if (candidate.id === agent.id) return false;
-    if (candidate.reportsTo === agent.id) return true;
-    return agent.id === rootId && !candidate.reportsTo;
-  });
-}
-
 function RecursiveNode({
   agent,
   allAgents,
@@ -350,7 +323,7 @@ function RecursiveNode({
   onLeaveAgent: () => void;
   registerNode: (agentId: string, node: HTMLDivElement | null) => void;
 }) {
-  const childAgents = getChildAgents(agent, allAgents, rootId);
+  const childAgents = getChildTeamAgents(agent, allAgents, rootId);
 
   return (
     <div className="flex flex-col items-center">
@@ -359,13 +332,7 @@ function RecursiveNode({
         idx={index}
         isRoot={agent.id === rootId}
         selected={selectedAgentId === agent.id}
-        workVisibility={
-          workVisibility[agent.id] ?? {
-            statusKey: isRecentlyActive(sessionLastActivity[agent.mainSessionKey]) ? 'active' : 'idle',
-            activeTaskCount: 0,
-            currentWorkTitles: [],
-          }
-        }
+        workVisibility={workVisibility[agent.id] ?? fallbackTeamMemberVisibility(agent, sessionLastActivity)}
         onClick={() => onSelectAgent(agent)}
         onHoverStart={(target) => onHoverAgent(agent, target)}
         onHoverEnd={onLeaveAgent}
@@ -409,6 +376,8 @@ export function TeamMap() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [radarOpen, setRadarOpen] = useState(false);
+  const [radarReady, setRadarReady] = useState(false);
   const [lastFocusedNodeId, setLastFocusedNodeId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const [hoverCardAnchor, setHoverCardAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -430,6 +399,23 @@ export function TeamMap() {
   useEffect(() => {
     void Promise.all([fetchAgents(), fetchTeams(), fetchTasks()]);
   }, [fetchAgents, fetchTeams, fetchTasks]);
+
+  // 团队能力雷达：仅在面板打开时请求；请求完成后无数据则展示空态而非无限 loading
+  const teamRadars = useDesignerStore((s) => s.teamRadars);
+  const fetchTeamRadar = useDesignerStore((s) => s.fetchTeamRadar);
+  const currentRadar = teamId ? (teamRadars[teamId] ?? null) : null;
+
+  useEffect(() => {
+    if (!teamId || !radarOpen) return;
+    let cancelled = false;
+    setRadarReady(false);
+    void fetchTeamRadar(teamId).finally(() => {
+      if (!cancelled) setRadarReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId, radarOpen, fetchTeamRadar]);
 
   const loading = agentsLoading || teamsLoading;
   const currentTeam = teams.find((team) => team.id === teamId) ?? null;
@@ -460,21 +446,13 @@ export function TeamMap() {
   const selectedAgent = scopedAgents.find((agent) => agent.id === selectedAgentId) ?? null;
   const hoveredAgent = scopedAgents.find((agent) => agent.id === hoveredAgentId) ?? null;
   const selectedAgentOwnedEntryPoints = selectedAgent
-    ? getOwnedEntryPoints(selectedAgent, channelOwners, configuredChannelTypes)
+    ? getTeamMemberOwnedEntryPoints(selectedAgent, channelOwners, configuredChannelTypes)
     : [];
   const selectedWorkVisibility = selectedAgent
-    ? workVisibility[selectedAgent.id] ?? {
-        statusKey: isRecentlyActive(sessionLastActivity[selectedAgent.mainSessionKey]) ? 'active' : 'idle',
-        activeTaskCount: 0,
-        currentWorkTitles: [],
-      }
+    ? workVisibility[selectedAgent.id] ?? fallbackTeamMemberVisibility(selectedAgent, sessionLastActivity)
     : undefined;
   const hoveredAgentWorkVisibility = hoveredAgent
-    ? workVisibility[hoveredAgent.id] ?? {
-        statusKey: isRecentlyActive(sessionLastActivity[hoveredAgent.mainSessionKey]) ? 'active' : 'idle',
-        activeTaskCount: 0,
-        currentWorkTitles: [],
-      }
+    ? workVisibility[hoveredAgent.id] ?? fallbackTeamMemberVisibility(hoveredAgent, sessionLastActivity)
     : undefined;
 
   const zoomIn = () => setScale((value) => Math.min(2, +(value + 0.2).toFixed(1)));
@@ -503,12 +481,10 @@ export function TeamMap() {
 
     setHoveredAgentId(agent.id);
     setHoverCardAnchor(
-      containerRect
-        ? {
-            top: targetRect.top - containerRect.top + targetRect.height / 2 - 40,
-            left: targetRect.left - containerRect.left + targetRect.width + 20,
-          }
-        : null,
+      buildTeamMapHoverAnchor({
+        containerRect,
+        targetRect,
+      }),
     );
   };
 
@@ -602,7 +578,7 @@ export function TeamMap() {
                       ? hoveredAgentWorkVisibility.currentWorkTitles[0] ?? null
                       : null
                   }
-                  nextStep={deriveNextStep(hoveredAgentWorkVisibility.statusKey, hoveredAgent.name)}
+                  nextStep={deriveTeamMemberNextStep(hoveredAgentWorkVisibility.statusKey, hoveredAgent.name)}
                 />
               ) : null}
             </div>
@@ -634,6 +610,55 @@ export function TeamMap() {
                 {t('teamMap.emptyTeam.title', { defaultValue: 'No members in this team yet' })}
               </div>
             </div>
+          ) : null}
+
+          {/* 团队能力雷达 */}
+          {currentTeam ? (
+            <>
+              {!radarOpen && (
+                <button
+                  type="button"
+                  onClick={() => setRadarOpen(true)}
+                  className="absolute bottom-6 right-6 z-10 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <Network className="h-4 w-4" />
+                  {t('teamMap.radar.toggle', { defaultValue: '能力雷达' })}
+                </button>
+              )}
+              {radarOpen && (
+                <div className="absolute bottom-6 right-6 z-10 w-[340px] rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <span className="text-xs font-bold text-slate-700">
+                      {t('teamMap.radar.title', { defaultValue: '团队能力雷达' })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setRadarOpen(false)}
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="p-4">
+                    {currentRadar ? (
+                      <TeamRadar data={currentRadar} />
+                    ) : !radarReady ? (
+                      <div className="flex flex-col items-center gap-2 py-6">
+                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-transparent" />
+                        <span className="text-[10px] text-slate-400">加载雷达数据...</span>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center">
+                        <p className="text-[12px] font-semibold text-slate-600">暂无团队雷达快照</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                          团队完成更多真实协作后，AgentCorp 会在这里沉淀 operate → learn 的能力画像。
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           ) : null}
         </div>
       </div>
@@ -682,7 +707,7 @@ export function TeamMap() {
                     selectedWorkVisibility.statusKey === 'blocked'
                       ? selectedWorkVisibility.currentWorkTitles[0] ?? null
                       : null,
-                  nextStep: deriveNextStep(selectedWorkVisibility.statusKey, selectedAgent.name),
+                  nextStep: deriveTeamMemberNextStep(selectedWorkVisibility.statusKey, selectedAgent.name),
                 }
               : undefined
           }

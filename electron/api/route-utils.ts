@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 
-export const HOST_API_SESSION_HEADER = 'x-clawx-host-session';
+export const HOST_API_SESSION_HEADER = 'x-agentcorp-host-session';
 
 export async function parseJsonBody<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];

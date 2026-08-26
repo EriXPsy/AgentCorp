@@ -16,7 +16,7 @@
             "isbinaryfile": "^5.0.0"
         }
     },
-    "description": "AgentCorp - AI Agent HR Evaluation Desktop App (forked from ClawCorp, MIT)",
+    "description": "AgentCorp - workflow-fit and operations desktop platform for AI agents",
     "main": "dist-electron/main/index.js",
     "author": "EriXPsy",
     "license": "MIT",

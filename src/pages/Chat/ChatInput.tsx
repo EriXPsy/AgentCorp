@@ -489,13 +489,13 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         return true;
       }
       case 'memory': {
-        navigate('/memory');
+        navigate('/settings?section=memory-knowledge');
         setComposerDraft('');
         setSlashActiveIndex(0);
         return true;
       }
       case 'cron': {
-        navigate('/cron');
+        navigate('/team-overview');
         setComposerDraft('');
         setSlashActiveIndex(0);
         return true;

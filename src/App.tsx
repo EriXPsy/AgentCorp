@@ -22,13 +22,12 @@ const TeamMap = lazy(() => import('./pages/TeamMap').then((m) => ({ default: m.T
 const Setup = lazy(() => import('./pages/Setup').then((m) => ({ default: m.Setup })));
 const Marketplace = lazy(() => import('./pages/Marketplace').then((m) => ({ default: m.Marketplace })));
 const TeamBuilder = lazy(() => import('./pages/TeamBuilder').then((m) => ({ default: m.TeamBuilder })));
+const TeamSpace = lazy(() => import('./pages/TeamSpace').then((m) => ({ default: m.TeamSpace })));
 const Evaluation = lazy(() => import('./pages/Evaluation').then((m) => ({ default: m.Evaluation })));
 const Interview = lazy(() => import('./pages/Interview').then((m) => ({ default: m.Interview })));
 // 模块 Arena：个性化对决（需求 → 同工种候选作答 → 双轨 Elo）
 const ArenaPage = lazy(() => import('./pages/Arena/ArenaPage').then((m) => ({ default: m.ArenaPage })));
 const Office = lazy(() => import('./pages/Office').then((m) => ({ default: m.Office })));
-// 成本看板：按 agent/团队/任务归集的 LLM token 用量与估算成本
-const LlmCosts = lazy(() => import('./pages/LlmCosts').then((m) => ({ default: m.LlmCosts })));
 // 会话页：左侧全高会话列表（团队房间/任务会话/Agent 会话分组）+ 右侧聊天区
 const Chats = lazy(() => import('./pages/Chats').then((m) => ({ default: m.Chats })));
 import { useSettingsStore } from './stores/settings';
@@ -237,6 +236,7 @@ function App() {
             <Route path="team-overview" element={<TeamOverview />} />
             <Route path="employee-builder" element={<EmployeeBuilder />} />
             <Route path="team-builder" element={<TeamBuilder />} />
+            <Route path="team-space/:teamId" element={<TeamSpace />} />
             <Route path="team-map/:teamId" element={<TeamMap />} />
             <Route path="team-map" element={<Navigate to="/team-overview" replace />} />
             <Route path="marketplace" element={<Marketplace />} />
@@ -249,7 +249,7 @@ function App() {
             {/* /memory 已迁移至 Settings > 记忆与知识 */}
             <Route path="memory" element={<Navigate to="/settings?section=memory-knowledge" replace />} />
             <Route path="costs" element={<Navigate to="/settings?section=costs-usage" replace />} />
-            <Route path="llm-costs" element={<LlmCosts />} />
+            <Route path="llm-costs" element={<Navigate to="/settings?section=costs-usage" replace />} />
             <Route path="settings/*" element={<Settings />} />
           </Route>
         </Routes>

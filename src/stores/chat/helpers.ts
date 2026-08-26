@@ -395,7 +395,7 @@ function enrichWithToolResultFiles(messages: RawMessage[]): RawMessage[] {
  * Restore _attachedFiles for messages loaded from history.
  * Handles:
  *   1. [media attached: path (mime) | path] patterns (attachment-button flow)
- *   2. Raw image file paths typed in message text (e.g. /Users/.../image.png)
+ *   2. Raw image file paths typed in message text (e.g. /absolute/path/image.png)
  * Uses local cache for previews when available; missing previews are loaded async.
  */
 function enrichWithCachedImages(messages: RawMessage[]): RawMessage[] {

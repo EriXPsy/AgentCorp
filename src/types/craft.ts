@@ -79,6 +79,14 @@ export interface CraftJudgement {
   verified_evidence?: Record<string, string>;
   /** 沙盒执行详情（非 code 工种或未启用时为 null） */
   sandbox?: SandboxResult | null;
+  /**
+   * 降级标记：judge 后端不可用时后端返回 200 + degraded=true，
+   * 机器证据（sandbox / security_scan / verified_evidence）仍然有效，
+   * 但 dims 为空、confidence=0——LLM 评分不可用。前端据此展示
+   * 「机器验证通过 / LLM 评分不可用」，不当作完整评测、也不补 0 分。
+   */
+  degraded?: boolean;
+  degraded_reason?: string;
 }
 
 /** 评分入参 */

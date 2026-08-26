@@ -36,7 +36,7 @@
       delete flat['HTTP-Referer'];
       delete flat['x-title'];
       delete flat['X-Title'];
-      flat['HTTP-Referer'] = 'https://claw-x.com';
+      flat['HTTP-Referer'] = 'https://github.com/EriXPsy/AgentCorp';
       flat['X-Title'] = 'AgentCorp';
       init.headers = flat;
     }

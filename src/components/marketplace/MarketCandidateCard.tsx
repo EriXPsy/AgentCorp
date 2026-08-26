@@ -113,7 +113,7 @@ export function MarketCandidateCard({
             )}
           >
             {candidate.hireType === 'team' ? <Building2 size={10} /> : <User size={10} />}
-            {candidate.hireType === 'team' ? '雇佣团队' : '雇佣员工'}
+            {candidate.hireType === 'team' ? '团队方案' : '单体方案'}
           </span>
         </div>
       </div>
@@ -202,7 +202,7 @@ export function MarketCandidateCard({
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">
-              已雇佣
+              已引入
             </p>
             <p className="mt-1 text-lg font-bold text-[#1A1C1E]">
               {candidate.hiredCount > 0 ? candidate.hiredCount : '—'}

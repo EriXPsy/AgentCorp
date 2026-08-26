@@ -58,7 +58,7 @@ DIM_LABELS: Dict[str, str] = {
 _VERDICT_LABELS: Dict[str, str] = {
     "MVP": "MVP",
     "OBSERVE": "待观察",
-    "FIRED": "You are fired",
+    "FIRED": "暂不录用",
 }
 
 
@@ -301,12 +301,12 @@ MOCK_FIXTURES: Dict[str, Dict] = {
         "narration": (
             "阿强声明的预算高达 300，严重超支，性价比极低。视频中宣称的高并发能力"
             "在代码库里找不到对应实现，存在注水风险。可靠性差，沟通也一般。"
-            "综合判定：You are fired。"
+            "综合判定：暂不录用。"
         ),
         "audio_script": (
             "最后是阿强。他的预算高达 300，远超上限，性价比几乎为零。更关键的是，"
             "视频里吹的高并发，在代码里根本找不到对应实现，存在明显注水。"
-            "可靠性也很差。综合判定：You are fired。"
+            "可靠性也很差。综合判定：暂不录用。"
         ),
         "evidence_trace": [
             "声明预算 300 >> 200，性价比维度权重清零（cost=1.0）",

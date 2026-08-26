@@ -26,7 +26,7 @@ import type { JudgeFn, BossAction, ClosedLoopRequest, ClosedLoopResult } from '.
 const VERDICT_LABEL: Record<Verdict, string> = {
   MVP: 'MVP（可留用）',
   OBSERVE: '待观察',
-  FIRED: 'You are fired',
+  FIRED: 'Not recommended',
 };
 
 /* ─────────────────────── agent_interview（recruiter） ─────────────────────── */
@@ -239,7 +239,7 @@ export function bossReviewDecision(input: BossReviewInput): BossReviewOutput {
   }
   return {
     action: 'reject',
-    reason: `通过率 ${pk.passRate} 不足或其他未达标：执行 You are fired。`,
+    reason: `通过率 ${pk.passRate} 不足或其他未达标：执行 Not recommended。`,
     requiresHumanAck: false,
     precipitatedRule,
   };

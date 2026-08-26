@@ -474,7 +474,7 @@ function renderActiveSection(args: RenderSectionArgs) {
             <div className="mt-4 flex gap-3">
               <button
                 type="button"
-                onClick={() => void invokeIpc('shell:openExternal', 'https://github.com/anthropics/claude-code/issues')}
+                onClick={() => void invokeIpc('shell:openExternal', 'https://github.com/EriXPsy/AgentCorp/issues')}
                 className="flex-1 rounded-xl border border-dashed border-[#c6c6c8] px-3 py-2.5 text-[13px] text-[#8e8e93] transition-colors hover:border-[#8e8e93] hover:text-[#3c3c43]"
               >
                 📝 提交 Issue (GitHub)

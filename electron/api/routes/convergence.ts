@@ -13,7 +13,7 @@
  * 被 convergenceStore 的 catch 兜底静默吞掉，「服务端权威对拍」名存实亡。
  * 本路由照 arena.ts 的转发模式补齐。
  *
- * 鉴权：沿用 server.ts 统一 isAuthorizedHostApiRequest（x-clawx-host-session）。
+ * 鉴权：沿用 server.ts 统一 isAuthorizedHostApiRequest（x-agentcorp-host-session）。
  * 模型服务不可达 / 非 200 时透传上游状态码。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';

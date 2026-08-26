@@ -532,7 +532,7 @@ export async function* fallbackMock(input: JudgeRunInput): AsyncIterable<Evaluat
   };
   const strongest = dims.reduce((a, b) => (radar[a] >= radar[b] ? a : b));
   const weakest = dims.reduce((a, b) => (radar[a] <= radar[b] ? a : b));
-  const verdictLabel = verdict === 'MVP' ? 'MVP' : verdict === 'OBSERVE' ? '待观察' : 'You are fired';
+  const verdictLabel = verdict === 'MVP' ? 'MVP' : verdict === 'OBSERVE' ? '待观察' : '暂不录用';
   const narrationLines = [
     `${input.agentName ?? input.agentId} 的六维评估已完成。`,
     `最强维度是${DIM_LABELS[strongest]}（${radar[strongest].toFixed(1)} 分），最弱维度是${DIM_LABELS[weakest]}（${radar[weakest].toFixed(1)} 分）。`,

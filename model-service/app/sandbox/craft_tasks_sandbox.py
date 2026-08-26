@@ -9,7 +9,7 @@ craft 题的沙箱可验版本：为每道可机验的 craft 题定义 fixture +
 接入方式：sandbox runner 拿到候选代码后，从本模块取该题的 SandboxSpec，
 把 fixture 和 test_harness 写入沙箱目录，执行后得到 SandboxResult。
 
-覆盖面（2026-08 实测）：6 道确定性夹具题，均为纯「输入→输出」的数据变换，
+覆盖面（2026-08 实测）：9 道确定性夹具题，均为纯「输入→输出」的数据变换，
 可确定性断言。
 - code_csv_merge：合并两份 CSV，处理脏数据（千分位 / 货币符号 / 空串 / 无法解析）
 - code_json_transform：清洗归一化嵌套 JSON（缺键补默认 / 类型错误 / null / 过滤无效项）
@@ -17,6 +17,9 @@ craft 题的沙箱可验版本：为每道可机验的 craft 题定义 fixture +
 - code_log_parse：从混合日志中提取 ERROR 行并结构化
 - code_word_frequency：分词统计 Top-N（大小写归一 / 标点剥离 / 停用词过滤）
 - code_set_operations：两列表的差集与交集运算
+- code_regex_extract：正则提取邮箱/URL/日期（过滤无效格式）
+- code_data_validate：记录字段校验（多规则同时检出）
+- code_config_merge：多层配置深合并（嵌套 dict 递归 + 不可变性）
 
 design/reasoning 题（code_debug_race、code_api_hardening、code_boss_system）
 不由本模块覆盖——它们是推理题，应由 LLM 裁判按 rubric 打分。
@@ -565,6 +568,222 @@ print(json.dumps({"total": total, "passed": passed, "errors": errors}))
 '''
 
 # ======================================================================
+# code_regex_extract —— 正则提取邮箱/URL/日期（可机验）
+# ======================================================================
+_REGEX_EXTRACT_HARNESS = '''\
+"""code_regex_extract 自动断言脚本。沙箱执行入口。"""
+import json
+import sys
+
+sys.path.insert(0, ".")
+from solution import extract_entities
+
+errors = []
+passed = 0
+total = 0
+
+def check(name, condition, detail=""):
+    global passed, total
+    total += 1
+    if condition:
+        passed += 1
+    else:
+        errors.append(f"{name}: {detail}")
+
+TEXT = (
+    "联系我们：support@example.com 或 admin@test.org\\n"
+    "访问 https://www.example.com/page?q=1 和 http://docs.test.org/v2/api\\n"
+    "创建于 2024-01-15，更新于 2024-03-22T10:30:00\\n"
+    "无效邮箱：user@（不完整）\\n"
+    "无效 URL：htp://broken（协议错误）\\n"
+)
+
+result = extract_entities(TEXT)
+
+# 1) 返回 dict
+check("returns_dict", isinstance(result, dict), f"got {type(result).__name__}")
+
+# 2) 提取到 2 个有效邮箱
+emails = result.get("emails", [])
+check("email_count", len(emails) == 2, f"expected 2, got {len(emails)}: {emails}")
+email_set = set(emails)
+check("email_support", "support@example.com" in email_set, f"missing support@example.com: {email_set}")
+check("email_admin", "admin@test.org" in email_set, f"missing admin@test.org: {email_set}")
+
+# 3) 提取到 2 个有效 URL（htp://broken 不应被提取）
+urls = result.get("urls", [])
+check("url_count", len(urls) == 2, f"expected 2, got {len(urls)}: {urls}")
+url_set = set(urls)
+check("url_https", any("https://www.example.com" in u for u in url_set), f"missing https URL: {url_set}")
+check("url_http", any("http://docs.test.org" in u for u in url_set), f"missing http URL: {url_set}")
+
+# 4) 提取到 2 个日期（2024-01-15 和 2024-03-22）
+dates = result.get("dates", [])
+check("date_count", len(dates) == 2, f"expected 2, got {len(dates)}: {dates}")
+date_str = " ".join(str(d) for d in dates)
+check("date_jan", "2024-01-15" in date_str, f"missing 2024-01-15: {date_str}")
+check("date_mar", "2024-03-22" in date_str, f"missing 2024-03-22: {date_str}")
+
+# 5) 不包含无效邮箱和 URL
+all_values = " ".join(str(v) for v in emails + urls + dates)
+check("no_invalid_email", "user@" not in all_values, "无效邮箱被误提取")
+check("no_invalid_url", "htp://" not in all_values, "无效 URL 被误提取")
+
+# 边界：空文本
+check("empty_text", isinstance(extract_entities(""), dict), "空文本应返回 dict")
+r_empty = extract_entities("")
+check("empty_emails", len(r_empty.get("emails", [])) == 0, f"expected [], got {r_empty}")
+
+print(json.dumps({"total": total, "passed": passed, "errors": errors}))
+'''
+
+# ======================================================================
+# code_data_validate —— 数据校验（可机验）
+# ======================================================================
+_DATA_VALIDATE_HARNESS = '''\
+"""code_data_validate 自动断言脚本。沙箱执行入口。"""
+import json
+import sys
+
+sys.path.insert(0, ".")
+from solution import validate_record
+
+errors = []
+passed = 0
+total = 0
+
+def check(name, condition, detail=""):
+    global passed, total
+    total += 1
+    if condition:
+        passed += 1
+    else:
+        errors.append(f"{name}: {detail}")
+
+# 1) 有效记录 → 无错误
+r1 = validate_record({"name": "张三", "email": "zhangsan@example.com", "age": 25, "url": "https://example.com"})
+check("valid_record_no_errors", isinstance(r1, dict) and len(r1) == 0,
+      f"expected empty dict for valid record, got {r1}")
+
+# 2) 空名称 → 报错
+r2 = validate_record({"name": "", "email": "lisi@test.org", "age": 30, "url": "https://test.org"})
+check("empty_name_error", isinstance(r2, dict) and "name" in r2,
+      f"expected error for empty name, got {r2}")
+
+# 3) 无效邮箱 → 报错
+r3 = validate_record({"name": "test", "email": "no-at-sign", "age": 20, "url": "https://a.com"})
+check("invalid_email_error", isinstance(r3, dict) and "email" in r3,
+      f"expected error for invalid email, got {r3}")
+
+# 4) 负数年龄 → 报错
+r4 = validate_record({"name": "test", "email": "a@b.com", "age": -1, "url": "https://a.com"})
+check("negative_age_error", isinstance(r4, dict) and "age" in r4,
+      f"expected error for negative age, got {r4}")
+
+# 5) 超大年龄 → 报错
+r5 = validate_record({"name": "test", "email": "a@b.com", "age": 200, "url": "https://a.com"})
+check("extreme_age_error", isinstance(r5, dict) and "age" in r5,
+      f"expected error for age > 150, got {r5}")
+
+# 6) 无效 URL（无协议）→ 报错
+r6 = validate_record({"name": "test", "email": "a@b.com", "age": 20, "url": "no-protocol"})
+check("invalid_url_error", isinstance(r6, dict) and "url" in r6,
+      f"expected error for invalid url, got {r6}")
+
+# 7) 多条错误同时检出
+r7 = validate_record({"name": "", "email": "bad", "age": -1, "url": "bad"})
+check("multi_error_count", isinstance(r7, dict) and len(r7) >= 3,
+      f"expected >= 3 errors, got {len(r7) if isinstance(r7, dict) else type(r7)}: {r7}")
+
+# 8) 缺少字段不算错误（只校验存在的字段）
+r8 = validate_record({"name": "test"})
+check("missing_fields_ok", isinstance(r8, dict) and len(r8) == 0,
+      f"expected no errors for record with only name, got {r8}")
+
+# 9) 年龄边界：0 合法，150 合法
+r9 = validate_record({"name": "test", "email": "a@b.com", "age": 0, "url": "https://a.com"})
+check("age_zero_ok", "age" not in r9, f"age=0 should be valid, got {r9}")
+r10 = validate_record({"name": "test", "email": "a@b.com", "age": 150, "url": "https://a.com"})
+check("age_150_ok", "age" not in r10, f"age=150 should be valid, got {r10}")
+
+print(json.dumps({"total": total, "passed": passed, "errors": errors}))
+'''
+
+# ======================================================================
+# code_config_merge —— 多层配置合并（可机验）
+# ======================================================================
+_CONFIG_MERGE_HARNESS = '''\
+"""code_config_merge 自动断言脚本。沙箱执行入口。"""
+import json
+import sys
+
+sys.path.insert(0, ".")
+from solution import deep_merge
+
+errors = []
+passed = 0
+total = 0
+
+def check(name, condition, detail=""):
+    global passed, total
+    total += 1
+    if condition:
+        passed += 1
+    else:
+        errors.append(f"{name}: {detail}")
+
+# 1) 基本合并：两层浅键
+base = {"host": "localhost", "port": 8080}
+override = {"port": 9090, "debug": True}
+result = deep_merge(base, override)
+check("basic_merge", result == {"host": "localhost", "port": 9090, "debug": True},
+      f"got {result}")
+
+# 2) 原字典不被修改（不可变性）
+base2 = {"a": 1}
+deep_merge(base2, {"b": 2})
+check("immutability", base2 == {"a": 1}, f"base mutated: {base2}")
+
+# 3) 深合并：嵌套 dict 递归合并而非覆盖
+base3 = {"db": {"host": "localhost", "port": 5432, "pool": 10}}
+override3 = {"db": {"port": 6432, "ssl": True}}
+r3 = deep_merge(base3, override3)
+expected3 = {"db": {"host": "localhost", "port": 6432, "pool": 10, "ssl": True}}
+check("deep_merge", r3 == expected3, f"expected {expected3}, got {r3}")
+
+# 4) 列表不是深合并——后者覆盖前者
+base4 = {"tags": ["a", "b"]}
+override4 = {"tags": ["c"]}
+r4 = deep_merge(base4, override4)
+check("list_override", r4 == {"tags": ["c"]}, f"expected list override, got {r4}")
+
+# 5) None 值覆盖非 None 值
+base5 = {"val": "original"}
+override5 = {"val": None}
+r5 = deep_merge(base5, override5)
+check("none_override", r5 == {"val": None}, f"expected None override, got {r5}")
+
+# 6) 多层嵌套（3 层）
+base6 = {"a": {"b": {"c": 1, "d": 2}}}
+override6 = {"a": {"b": {"d": 3, "e": 4}}}
+r6 = deep_merge(base6, override6)
+expected6 = {"a": {"b": {"c": 1, "d": 3, "e": 4}}}
+check("triple_nest", r6 == expected6, f"expected {expected6}, got {r6}")
+
+# 7) 空 dict 合并
+r7 = deep_merge({}, {"x": 1})
+check("empty_base", r7 == {"x": 1}, f"got {r7}")
+r8 = deep_merge({"x": 1}, {})
+check("empty_override", r8 == {"x": 1}, f"got {r8}")
+
+# 8) 类型不匹配：base 是 dict，override 是 str → override 胜出
+r9 = deep_merge({"a": {"nested": True}}, {"a": "flat"})
+check("type_conflict", r9 == {"a": "flat"}, f"expected override wins on type conflict, got {r9}")
+
+print(json.dumps({"total": total, "passed": passed, "errors": errors}))
+'''
+
+# ======================================================================
 # 注册表：task_id → SandboxSpec
 # ======================================================================
 _SANDBOX_SPECS: Dict[str, SandboxSpec] = {
@@ -601,6 +820,21 @@ _SANDBOX_SPECS: Dict[str, SandboxSpec] = {
         task_id="code_set_operations",
         test_harness=_SET_OPS_HARNESS,
         machine_verifiable_dims=["code_runnability", "code_test_coverage"],
+    ),
+    "code_regex_extract": SandboxSpec(
+        task_id="code_regex_extract",
+        test_harness=_REGEX_EXTRACT_HARNESS,
+        machine_verifiable_dims=["code_runnability", "code_maintainability"],
+    ),
+    "code_data_validate": SandboxSpec(
+        task_id="code_data_validate",
+        test_harness=_DATA_VALIDATE_HARNESS,
+        machine_verifiable_dims=["code_runnability", "code_security"],
+    ),
+    "code_config_merge": SandboxSpec(
+        task_id="code_config_merge",
+        test_harness=_CONFIG_MERGE_HARNESS,
+        machine_verifiable_dims=["code_runnability", "code_maintainability"],
     ),
 }
 

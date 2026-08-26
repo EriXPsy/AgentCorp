@@ -40,13 +40,13 @@ class TestAllEvaluatorsRegistered:
         reg = JudgeRegistry()
         register_all(reg)
         ids = set(reg.list_ids())
-        for expected in ("craft_judge", "arena_judge", "sandbox", "growth", "enterprise_fit"):
+        for expected in ("craft_judge", "arena_judge", "sandbox", "security_scan", "designer", "growth", "enterprise_fit"):
             assert expected in ids, f"Evaluator '{expected}' 未注册"
 
-    def test_at_least_five_registered(self):
+    def test_at_least_seven_registered(self):
         reg = JudgeRegistry()
         register_all(reg)
-        assert len(reg.list_ids()) >= 5
+        assert len(reg.list_ids()) >= 7
 
 
 # ======================================================================
@@ -547,3 +547,117 @@ class TestDispatchChainAsync:
             stop_on_error=False,
         )
         assert merged.scores == {"q": 3}
+
+
+# ======================================================================
+# 11. 健康模型（Evaluator 自报健康 + 注册表聚合）
+# ======================================================================
+class TestHealth:
+    """registry.health() 聚合各 Evaluator 的健康状态。"""
+
+    def test_no_health_method_defaults_healthy(self):
+        """未实现 health() 的 Evaluator 默认 healthy。"""
+        reg = JudgeRegistry()
+        from app.scoring.evaluators.sandbox_evaluator import SandboxEvaluator
+        reg.register(SandboxEvaluator())
+        h = reg.health()
+        assert h["overall"] == "healthy"
+        assert h["evaluators"]["sandbox"]["status"] == "healthy"
+
+    def test_unavailable_evaluator_degrades_overall(self):
+        """任一 Evaluator unavailable → overall=unavailable。"""
+
+        class _Down:
+            evaluator_id = "down"
+            applicable_jobs = ["code"]
+            def evaluate(self, inp): ...
+            def health(self):
+                from app.scoring.evaluator_protocol import EvaluatorHealth
+                return EvaluatorHealth(
+                    evaluator_id="down", status="unavailable", reason="backend down",
+                )
+
+        reg = JudgeRegistry()
+        reg.register(_Down())
+        h = reg.health()
+        assert h["overall"] == "unavailable"
+        assert h["evaluators"]["down"]["status"] == "unavailable"
+        assert "backend down" in h["evaluators"]["down"]["reason"]
+
+    def test_degraded_evaluator_sets_overall_degraded(self):
+        """degraded（非 unavailable）→ overall=degraded。"""
+
+        class _Deg:
+            evaluator_id = "deg"
+            applicable_jobs = ["code"]
+            def evaluate(self, inp): ...
+            def health(self):
+                from app.scoring.evaluator_protocol import EvaluatorHealth
+                return EvaluatorHealth(
+                    evaluator_id="deg", status="degraded", reason="partial",
+                )
+
+        reg = JudgeRegistry()
+        reg.register(_Deg())
+        assert reg.health()["overall"] == "degraded"
+
+    def test_health_exception_treated_as_unavailable(self):
+        """health() 自身抛异常 → 视作 unavailable，不拖垮注册表。"""
+
+        class _Boom:
+            evaluator_id = "boom"
+            applicable_jobs = ["code"]
+            def evaluate(self, inp): ...
+            def health(self):
+                raise RuntimeError("health check exploded")
+
+        reg = JudgeRegistry()
+        reg.register(_Boom())
+        h = reg.health()
+        assert h["overall"] == "unavailable"
+        assert "exploded" in h["evaluators"]["boom"]["reason"]
+
+    def test_craft_judge_health_reflects_backend(self, monkeypatch):
+        """CraftJudgeEvaluator.health() 随 judge 后端可用性变化。"""
+        from app.scoring import craft_judge as craft_judge_mod
+        from app.scoring.craft_judge import CraftJudgeEvaluator
+
+        ev = CraftJudgeEvaluator()
+
+        # 默认 mock 后端 available=False → unavailable
+        h = ev.health()
+        assert h.status == "unavailable"
+
+        # 模拟后端可用（换成一个 available=True 的桩）
+        class _AvailStub:
+            name = "stub"
+            available = True
+            def complete(self, *a, **kw): ...
+
+        monkeypatch.setattr(craft_judge_mod, "get_backend", lambda: _AvailStub())
+        h2 = ev.health()
+        assert h2.status == "healthy"
+
+
+# ======================================================================
+# 12. EvaluatorOutput 降级字段
+# ======================================================================
+class TestDegradedOutput:
+    """EvaluatorOutput 的 degraded / degraded_reason 默认值与透传。"""
+
+    def test_default_not_degraded(self):
+        from app.scoring.evaluator_protocol import EvaluatorOutput
+        out = EvaluatorOutput(evaluator_id="x")
+        assert out.degraded is False
+        assert out.degraded_reason == ""
+
+    def test_degraded_output_carries_reason(self):
+        from app.scoring.evaluator_protocol import EvaluatorOutput
+        out = EvaluatorOutput(
+            evaluator_id="craft_judge",
+            degraded=True,
+            degraded_reason="judge backend down",
+            verified_evidence={"run": "passed"},
+        )
+        assert out.degraded is True
+        assert out.verified_evidence == {"run": "passed"}

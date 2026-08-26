@@ -39,7 +39,7 @@ import re
 from typing import Dict, List, Optional
 
 from ..judge_backend import JudgeCompletion, JudgeUnavailable, get_backend
-from .evaluator_protocol import EvaluatorInput, EvaluatorOutput
+from .evaluator_protocol import EvaluatorHealth, EvaluatorInput, EvaluatorOutput
 from .registry import JOB_CRAFT_DIMS
 
 logger = logging.getLogger("arena_judge")
@@ -395,6 +395,16 @@ class ArenaJudgeEvaluator:
 
     evaluator_id = "arena_judge"
     applicable_jobs = ["code", "text", "image"]
+
+    def health(self) -> EvaluatorHealth:
+        backend = get_backend()
+        if not backend.available:
+            return EvaluatorHealth(
+                evaluator_id=self.evaluator_id,
+                status="unavailable",
+                reason=f"judge 后端不可用（{backend.name}）",
+            )
+        return EvaluatorHealth(evaluator_id=self.evaluator_id, status="healthy")
 
     def evaluate(self, inp: EvaluatorInput) -> EvaluatorOutput:
         opts = inp.options or {}

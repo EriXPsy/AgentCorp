@@ -76,7 +76,7 @@ export const TRANSITIONS: Record<LifecycleState, TransitionRule[]> = {
       trigger: "manual",
       guard: () => true,
       to: "RETIRED",
-      reason: () => "人工执行一键 fire（You are fired）",
+      reason: () => "人工将该候选移出在岗名单",
     },
   ],
   TRAINING: [
@@ -105,7 +105,7 @@ export const TRANSITIONS: Record<LifecycleState, TransitionRule[]> = {
       trigger: "manual",
       guard: () => true,
       to: "RETIRED",
-      reason: () => "人工执行一键 fire（You are fired）",
+      reason: () => "人工将该候选移出在岗名单",
     },
   ],
   MAINTENANCE: [

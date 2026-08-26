@@ -60,18 +60,15 @@ type SearchHistoryEntry = {
 };
 
 const STATIC_PAGE_ITEMS: StaticPageItem[] = [
-  { id: 'chat', label: 'Chat', path: '/', icon: '✦' },
-  { id: 'models', label: 'Models', path: '/models', icon: '🤖' },
-  { id: 'agents', label: 'Agents', path: '/agents', icon: '🧬' },
-  { id: 'channels', label: 'Channels', path: '/channels', icon: '📗' },
-  { id: 'skills', label: 'Skills', path: '/skills', icon: '🧠' },
-  { id: 'cron', label: 'Cron', path: '/cron', icon: '⏰' },
-  { id: 'activity', label: 'Activity', path: '/activity', icon: '📋' },
-  { id: 'memory', label: 'Memory', path: '/memory', icon: '🗂' },
-  { id: 'costs', label: 'Costs', path: '/costs', icon: '💰' },
-  { id: 'team-overview', label: 'Team Overview', path: '/team-overview', icon: '👥' },
-  { id: 'team-map', label: 'Team Map', path: '/team-map', icon: '🗺' },
-  // Task Kanban 暂时移出搜索：/kanban 仍是占位页（见 pages/Kanban/index.tsx）
+  { id: 'home', label: 'Home', path: '/', icon: '✦' },
+  { id: 'sessions', label: 'Sessions', path: '/chats', icon: '💬' },
+  { id: 'marketplace', label: 'Marketplace', path: '/marketplace', icon: '🧭' },
+  { id: 'workforce', label: 'Workforce', path: '/team-overview', icon: '👥' },
+  { id: 'interview', label: 'Interview', path: '/interview', icon: '🗣️' },
+  { id: 'evaluation', label: 'Evaluation', path: '/evaluation', icon: '📊' },
+  { id: 'office', label: 'Office', path: '/office', icon: '🏢' },
+  { id: 'memory', label: 'Memory & Knowledge', path: '/settings?section=memory-knowledge', icon: '🗂' },
+  { id: 'costs', label: 'Costs & Usage', path: '/settings?section=costs-usage', icon: '💰' },
   { id: 'settings', label: 'Settings', path: '/settings', icon: '⚙️' },
 ];
 

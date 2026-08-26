@@ -164,12 +164,12 @@ linux:
   category: Utility
   maintainer: AgentCorp Team <public@valuecell.ai>
   vendor: AgentCorp
-  synopsis: AI Assistant powered by OpenClaw
-  description: AgentCorp is a graphical AI assistant application that integrates with OpenClaw Gateway to provide intelligent automation and assistance across multiple messaging platforms.
+  synopsis: Workflow-fit platform for discovering and operating AI agents
+  description: AgentCorp is a desktop platform for discovering, validating, routing, and operating AI agents across real work scenarios, with local-first controls and evidence-aware evaluation workflows.
   desktop:
     entry:
       Name: AgentCorp
-      Comment: AI Assistant powered by OpenClaw
+      Comment: Workflow-fit platform for operating AI agents
       Categories: Utility;Network;
       Keywords: ai;assistant;automation;chat;
       StartupWMClass: agentcorp

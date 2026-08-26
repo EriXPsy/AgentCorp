@@ -237,7 +237,7 @@ export interface VerdictEvent {
   confidence: number;
   /**
    * E · 裁判来源（透明披露）：'degraded' = 离线启发式回退，缺省 = 外部 MiniCPM-o 裁判。
-   * verdict 是用户最当真的结论（MVP / 待观察 / You are fired），
+   * verdict 是用户最当真的结论（MVP / 待观察 / Not recommended），
    * 哈希派生的 FIRED 与真裁判给的 FIRED 必须可区分。
    */
   source?: "judge" | "degraded";

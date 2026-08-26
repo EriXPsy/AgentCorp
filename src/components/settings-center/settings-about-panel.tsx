@@ -144,10 +144,10 @@ export function SettingsAboutPanel({ onRerunSetup }: SettingsAboutPanelProps) {
             {t('about.appName', { defaultValue: 'AgentCorp' })}
           </h2>
           <p className="mt-2 text-[14px] text-[#475467]">
-            Graphical AI assistant for OpenClaw teams, runtime operators, and daily agent work.
+            Workflow-fit platform for discovering, validating, and operating AI agents in real work.
           </p>
           <div className="mt-4 flex flex-wrap gap-4 text-[12px] text-[#667085]">
-            <span>{t('about.basedOn', { defaultValue: 'Based on OpenClaw' })}</span>
+            <span>Architecture-led product shell</span>
             <span>Version {currentVersion}</span>
             <span>Electron + React + Vite</span>
           </div>
@@ -157,19 +157,19 @@ export function SettingsAboutPanel({ onRerunSetup }: SettingsAboutPanelProps) {
           <div className="rounded-xl bg-[#f9fafb] px-4 py-4">
             <p className="text-[13px] font-semibold text-[#111827]">Product & Team</p>
             <p className="mt-2 text-[12px] leading-6 text-[#667085]">
-              AgentCorp keeps the OpenClaw runtime approachable with a desktop-first control plane,
-              clearer settings, and a tighter path from experimentation to real team workflows.
+              AgentCorp packages candidate discovery, fit validation, task routing, and operating feedback
+              into one desktop-first control plane for day-to-day agent work.
             </p>
             <p className="mt-2 text-[12px] leading-6 text-[#667085]">
-              The maintenance surfaces stay here so product context, support, and diagnostics live
-              together instead of competing for top-level navigation.
+              Settings keep diagnostics and maintenance nearby, while the primary product flow stays focused on
+              discover → validate → operate → learn.
             </p>
           </div>
           <div className="rounded-xl bg-[#f9fafb] px-4 py-4">
             <p className="text-[13px] font-semibold text-[#111827]">Open Source & Feedback</p>
             <p className="mt-2 text-[12px] leading-6 text-[#667085]">
-              Built on OpenClaw and distributed for teams that need a desktop shell around agent,
-              model, and channel workflows. The app keeps diagnostics available, but secondary.
+              The public repository carries the architecture blueprint, implementation notes, and issue tracker so
+              contributors can improve the product against one shared system map.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -177,12 +177,24 @@ export function SettingsAboutPanel({ onRerunSetup }: SettingsAboutPanelProps) {
                 onClick={() =>
                   void invokeIpc(
                     'shell:openExternal',
-                    'https://github.com/anthropics/claude-code/issues',
+                    'https://github.com/EriXPsy/AgentCorp/issues',
                   )
                 }
                 className="rounded-lg border border-black/10 px-3 py-2 text-[12px] font-medium text-[#111827] transition hover:bg-[#f2f2f7]"
               >
                 提交 Issue
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void invokeIpc(
+                    'shell:openExternal',
+                    'https://github.com/EriXPsy/AgentCorp/blob/main/docs/architecture-blueprint.md',
+                  )
+                }
+                className="rounded-lg border border-black/10 px-3 py-2 text-[12px] font-medium text-[#111827] transition hover:bg-[#f2f2f7]"
+              >
+                查看架构蓝图
               </button>
               <button
                 type="button"
@@ -206,7 +218,7 @@ export function SettingsAboutPanel({ onRerunSetup }: SettingsAboutPanelProps) {
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-semibold text-[#111827]">AgentCorp Doctor</p>
               <p className="mt-1 text-[12px] text-[#667085]">
-                从设置页直接运行 OpenClaw 诊断检查，无需打开独立维护路由。
+                从设置页直接运行运行时诊断检查，无需跳转到独立维护页面。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

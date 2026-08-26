@@ -22,7 +22,7 @@ import type { A2aTraceRecord } from '../../../src/types/evaluation';
  *                                     （渲染层团队任务编排的 A2A trace 经此同盘落盘，
  *                                      与主进程委派链共用一套浏览/回放口径）
  *
- * 与 evaluate/arena 路由同源鉴权（x-clawx-host-session），不另开权限面。
+ * 与 evaluate/arena 路由同源鉴权（x-agentcorp-host-session），不另开权限面。
  * 读盘失败永不抛出——返回空列表/空数组，让前端如实展示「无 trace」而非崩溃。
  * 落盘同理：appendA2aTrace 内部容错，POST 只汇报实际写入条数。
  */

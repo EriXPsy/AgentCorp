@@ -7,7 +7,7 @@
  *       /api/evaluate-run（MiniCPM-o 模型服务），将其返回的 SSE 事件流
  *       原样流式转发回 renderer。
  *
- * 鉴权：沿用 server.ts 的统一 isAuthorizedHostApiRequest（x-clawx-host-session）。
+ * 鉴权：沿用 server.ts 的统一 isAuthorizedHostApiRequest（x-agentcorp-host-session）。
  * 模型服务不可达 / 非 200 时，返回 503 / 对应状态码（renderer 侧 judgeClient 会回退 Mock）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';

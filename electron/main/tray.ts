@@ -57,7 +57,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   tray = new Tray(icon);
   
   // Set tooltip
-  tray.setToolTip('AgentCorp - AI Assistant');
+  tray.setToolTip('AgentCorp - Workflow Fit Platform');
   
   const showWindow = () => {
     if (mainWindow.isDestroyed()) return;
@@ -99,11 +99,11 @@ export function createTray(mainWindow: BrowserWindow): Tray {
           },
         },
         {
-          label: 'Open Chat',
+          label: 'Open Sessions',
           click: () => {
             if (mainWindow.isDestroyed()) return;
             mainWindow.show();
-            mainWindow.webContents.send('navigate', '/chat');
+            mainWindow.webContents.send('navigate', '/chats');
           },
         },
         {

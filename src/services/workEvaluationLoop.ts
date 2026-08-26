@@ -103,7 +103,7 @@ export async function evaluateCompletedWork(
 ): Promise<EvaluationProfile | null> {
   if (!shouldEvaluateWork(work)) return null;
   try {
-    const profile = await useEvaluationStore.getState().runEvaluation({
+    const evaluation = await useEvaluationStore.getState().runEvaluation({
       runId: work.runId ?? null,
       agentId: work.agentId,
       agentName: work.agentName,
@@ -119,6 +119,7 @@ export async function evaluateCompletedWork(
       // 主进程采集会返回空转录 —— 用真实交付物兜底，让裁判有证据可依。
       transcriptFallback: buildWorkTranscript(work),
     });
+    const profile = evaluation?.profile ?? null;
     // 评测成功后，把这次协作沉淀为经验胶囊（best-effort，绝不阻塞回流）：
     // 胶囊是 G12 eval-in-loop 的回归集原子，也是后续 Agent 适配与群体经验
     // 共享的基础——兑现「真实交付回流成新的评测证据」与「人的能力增量」北极星。

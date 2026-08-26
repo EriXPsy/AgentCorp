@@ -13,6 +13,15 @@
 
 ---
 
+## 架构蓝图
+
+对协作者与贡献者，推荐先阅读：
+
+- [`docs/architecture-blueprint.md`](docs/architecture-blueprint.md)：北极星定位、业务域边界、核心实体与代码放置规则
+- [`docs/architecture-system-map.md`](docs/architecture-system-map.md)：运行拓扑、状态机、实体关系与模块迁移路线图
+
+这两份文档共同定义了 AgentCorp 的统一架构语言，帮助后续功能迭代在同一规划下推进，而不是各模块各自生长。
+
 ## 为什么需要它
 
 现有的 Agent 评测基本回答不了两个实际问题：
@@ -392,4 +401,4 @@ CI（`.github/workflows/ci.yml`）：push 到 `main` / `feat/*` 与 PR 触发，
 
 ## 7. 许可
 
-MIT。Forked from ClawCorp (MIT)。
+MIT。项目中包含基于 MIT 许可开源软件衍生与集成的组件，具体归属见仓库内 LICENSE 与相关源码头注释。

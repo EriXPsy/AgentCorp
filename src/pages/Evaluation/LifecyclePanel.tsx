@@ -1,7 +1,7 @@
 /**
  * src/pages/Evaluation/LifecyclePanel.tsx
  * 生命周期治理面板：展示当前 lifecycle 状态，提供
- * 「软退休（You are fired）」与「回岗（Reactivate）」治理动作。
+ * 「移出在岗名单」与「回岗（Reactivate）」治理动作。
  *
  * 软退休为「逻辑淘汰」：仅将 lifecycle 置为 RETIRED，不物理删除档案
  * （与 src/types/lifecycle.ts 的软退休约定一致）。回岗置 ACTIVE。
@@ -87,7 +87,7 @@ export function LifecyclePanel({ agentId, state, onSoftRetire, onReactivate, bus
           onClick={() => onSoftRetire(agentId)}
           className="flex-1 rounded-full bg-rose-500 px-4 py-2 text-[13px] font-bold text-white shadow-sm transition-all hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {t('evaluation.lifecycle.fired', 'You are fired')}
+          {t('evaluation.lifecycle.fired', 'Remove from active roster')}
         </button>
         <button
           type="button"

@@ -1,63 +1,63 @@
 /**
  * Application Menu Configuration
- * Creates the native application menu for macOS/Windows/Linux
+ * Creates the native application menu for macOS/Windows/Linux.
+ *
+ * Menu policy:
+ * - only link to routes that exist in the current product shell
+ * - keep Help aligned with the public AgentCorp repository and docs
+ * - avoid surfacing legacy navigation that no longer has a maintained screen
  */
 import { Menu, app, shell, BrowserWindow } from 'electron';
 
-/**
- * Create application menu
- */
+const DOCS_URL = 'https://github.com/EriXPsy/AgentCorp';
+const ARCHITECTURE_URL = 'https://github.com/EriXPsy/AgentCorp/blob/main/docs/architecture-blueprint.md';
+const ISSUES_URL = 'https://github.com/EriXPsy/AgentCorp/issues';
+
+function navigate(path: string): void {
+  const win = BrowserWindow.getFocusedWindow();
+  win?.webContents.send('navigate', path);
+}
+
 export function createMenu(): void {
   const isMac = process.platform === 'darwin';
-  
+
   const template: Electron.MenuItemConstructorOptions[] = [
-    // App menu (macOS only)
     ...(isMac
-      ? [
-          {
-            label: app.name,
-            submenu: [
-              { role: 'about' as const },
-              { type: 'separator' as const },
-              {
-                label: 'Preferences...',
-                accelerator: 'Cmd+,',
-                click: () => {
-                  const win = BrowserWindow.getFocusedWindow();
-                  win?.webContents.send('navigate', '/settings');
-                },
-              },
-              { type: 'separator' as const },
-              { role: 'services' as const },
-              { type: 'separator' as const },
-              { role: 'hide' as const },
-              { role: 'hideOthers' as const },
-              { role: 'unhide' as const },
-              { type: 'separator' as const },
-              { role: 'quit' as const },
-            ],
-          },
-        ]
+      ? [{
+          label: app.name,
+          submenu: [
+            { role: 'about' as const },
+            { type: 'separator' as const },
+            {
+              label: 'Preferences…',
+              accelerator: 'Cmd+,',
+              click: () => navigate('/settings'),
+            },
+            { type: 'separator' as const },
+            { role: 'services' as const },
+            { type: 'separator' as const },
+            { role: 'hide' as const },
+            { role: 'hideOthers' as const },
+            { role: 'unhide' as const },
+            { type: 'separator' as const },
+            { role: 'quit' as const },
+          ],
+        }]
       : []),
-    
-    // File menu
+
     {
       label: 'File',
       submenu: [
         {
-          label: 'New Chat',
+          label: 'Open Workspace',
           accelerator: 'CmdOrCtrl+N',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/chat');
-          },
+          click: () => navigate('/'),
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
     },
-    
-    // Edit menu
+
     {
       label: 'Edit',
       submenu: [
@@ -80,8 +80,7 @@ export function createMenu(): void {
             ]),
       ],
     },
-    
-    // View menu
+
     {
       label: 'View',
       submenu: [
@@ -96,63 +95,26 @@ export function createMenu(): void {
         { role: 'togglefullscreen' },
       ],
     },
-    
-    // Navigate menu
+
     {
       label: 'Navigate',
       submenu: [
-        {
-          label: 'Dashboard',
-          accelerator: 'CmdOrCtrl+1',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/');
-          },
-        },
-        {
-          label: 'Chat',
-          accelerator: 'CmdOrCtrl+2',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/chat');
-          },
-        },
-        {
-          label: 'Channels',
-          accelerator: 'CmdOrCtrl+3',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/channels');
-          },
-        },
-        {
-          label: 'Skills',
-          accelerator: 'CmdOrCtrl+4',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/skills');
-          },
-        },
-        {
-          label: 'Cron Tasks',
-          accelerator: 'CmdOrCtrl+5',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/cron');
-          },
-        },
+        { label: 'Home', accelerator: 'CmdOrCtrl+1', click: () => navigate('/') },
+        { label: 'Sessions', accelerator: 'CmdOrCtrl+2', click: () => navigate('/chats') },
+        { label: 'Marketplace', accelerator: 'CmdOrCtrl+3', click: () => navigate('/marketplace') },
+        { label: 'Workforce', accelerator: 'CmdOrCtrl+4', click: () => navigate('/team-overview') },
+        { label: 'Interview', accelerator: 'CmdOrCtrl+5', click: () => navigate('/interview') },
+        { label: 'Evaluation', accelerator: 'CmdOrCtrl+6', click: () => navigate('/evaluation') },
+        { label: 'Office', accelerator: 'CmdOrCtrl+7', click: () => navigate('/office') },
+        { type: 'separator' },
         {
           label: 'Settings',
           accelerator: isMac ? 'Cmd+,' : 'Ctrl+,',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/settings');
-          },
+          click: () => navigate('/settings'),
         },
       ],
     },
-    
-    // Window menu
+
     {
       label: 'Window',
       submenu: [
@@ -168,34 +130,32 @@ export function createMenu(): void {
           : [{ role: 'close' as const }]),
       ],
     },
-    
-    // Help menu
+
     {
       role: 'help',
       submenu: [
         {
-          label: 'Documentation',
+          label: 'Product Overview',
           click: async () => {
-            await shell.openExternal('https://claw-x.com');
+            await shell.openExternal(DOCS_URL);
+          },
+        },
+        {
+          label: 'Architecture Blueprint',
+          click: async () => {
+            await shell.openExternal(ARCHITECTURE_URL);
           },
         },
         {
           label: 'Report Issue',
           click: async () => {
-            await shell.openExternal('https://github.com/EriXPsy/AgentCorp/issues');
-          },
-        },
-        { type: 'separator' },
-        {
-          label: 'OpenClaw Documentation',
-          click: async () => {
-            await shell.openExternal('https://docs.openclaw.ai');
+            await shell.openExternal(ISSUES_URL);
           },
         },
       ],
     },
   ];
-  
+
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }

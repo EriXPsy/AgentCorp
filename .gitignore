@@ -105,6 +105,9 @@ docs/strategy/
 # Layer3 可选 JSON 落盘（运行时生成，非源码）
 convergence-store.json
 
+# 基准实验运行时产出（不入仓；基准数据 small text 可入仓）
+model-service/data/experiments/
+
 # 模型权重（GGUF/transformers 全量，体积 GB 级，不入库）
 model-service/models/
 
@@ -120,3 +123,4 @@ update/
 # PPT 交付以 pptx 为准，PDF 由本地导出，不入仓
 方案PPT/*.pdf
 scripts/eval/squad-bench-results/
+model-service/data/style_memory/

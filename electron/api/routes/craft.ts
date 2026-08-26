@@ -7,7 +7,7 @@
  *   POST /api/craft-judge  → model-service /api/craft-judge（单题 LLM-as-judge 评分）
  *   POST /api/chat-judge   → model-service /api/chat-judge（对话整段评分）
  *
- * 鉴权：沿用 server.ts 统一 isAuthorizedHostApiRequest（x-clawx-host-session）。
+ * 鉴权：沿用 server.ts 统一 isAuthorizedHostApiRequest（x-agentcorp-host-session）。
  * 上游状态码透传：judge 后端不可用时 model-service 返回 503，调用方据此提示而非展示伪造分数。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';

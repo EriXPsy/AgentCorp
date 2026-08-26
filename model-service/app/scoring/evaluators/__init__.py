@@ -16,14 +16,18 @@ def register_all(registry: JudgeRegistry) -> None:
     新增 Evaluator 必须在此 import + 注册，否则 CI 强制失败。
     """
     from .sandbox_evaluator import SandboxEvaluator
+    from .security_scan_evaluator import SecurityScanEvaluator
     from .growth_evaluator import GrowthEvaluator
     from .enterprise_fit_evaluator import EnterpriseFitEvaluator
     from ..craft_judge import CraftJudgeEvaluator
     from ..arena_judge import ArenaJudgeEvaluator
     from .gold_reference_evaluator import GoldReferenceEvaluator
+    from ..designer import DesignerEvaluator
 
     for ev in [
         SandboxEvaluator(),
+        SecurityScanEvaluator(),
+        DesignerEvaluator(),
         GrowthEvaluator(),
         EnterpriseFitEvaluator(),
         CraftJudgeEvaluator(),

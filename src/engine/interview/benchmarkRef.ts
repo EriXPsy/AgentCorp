@@ -2,7 +2,7 @@
  * src/engine/interview/benchmarkRef.ts
  * 公开 benchmark 参照知识库 + 任务类型分类纯函数。
  *
- * 设计理念（见 .workbuddy/artifacts/agentcorp-benchmark-research-2026-08-19.md）：
+ * 设计理念（见内部 benchmark 调研笔记与公开架构蓝图）：
  * AgentCorp 不照搬公开 benchmark 题目（避 contamination + 与真实工作流脱节），
  * 而是把公开 benchmark 作为「对照锚点」——让 AgentCorp 的评估结论有公开参照
  * （「这个 Agent 在我们的 code-issue-fix 任务上 = SWE-bench Verified 的 X 分位」），

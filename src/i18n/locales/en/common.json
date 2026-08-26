@@ -37,7 +37,7 @@
     "taskSchedule": "Task schedule",
     "memoryKnowledge": "Memory knowledge base",
     "costUsage": "Cost usage",
-    "humanAssets": "Human Assets",
+    "humanAssets": "Workforce",
     "teamOverview": "Team overview",
     "employeeSquare": "Employee square",
     "sessions": "Sessions",
@@ -406,7 +406,7 @@
     "emptyAgent": "空闲中"
   },
   "teamOverview": {
-    "title": "Team Overview",
+    "title": "Workforce",
     "summary": "{{count}} Agents · {{gateway}}",
     "hireButton": "+ Hire New Agent",
     "defaultBadge": "Default",
@@ -536,7 +536,7 @@
       "blocked": "阻塞"
     },
     "humanAssets": {
-      "title": "Human Assets",
+      "title": "Workforce",
       "subtitle": "Manage your digital workforce and their full lifecycle status",
       "localImport": "Local Import",
       "buildEmployee": "Build Employee",
@@ -686,19 +686,19 @@
   },
   "marketplace": {
     "title": "Talent Marketplace",
-    "subtitle": "Discover and hire the world's top digital employees",
+    "subtitle": "Discover and bring the right agents into your workflow",
     "searchPlaceholder": "Search agents...",
     "priceLabel": "Deployment Cost",
     "empty": "No matching agents found",
     "clearFilters": "Clear filters",
-    "listEmployee": "List My Agent",
+    "listEmployee": "Publishing Intake (Planned)",
     "allTypes": "All Types",
     "hireCompany": "Hire Company",
     "hireEmployee": "Hire Employee",
     "hireCompanyHint": "Hire Company = SOP Workflow · Hire Employee = Single Agent",
     "hiredCount": "Hired",
-    "listTitle": "List My Agent",
-    "listSubtitle": "Publish your Agent to the marketplace for other teams to discover and hire",
+    "listTitle": "Publishing Intake (Planned)",
+    "listSubtitle": "Public publishing will open after marketplace schema, review rules, and permission boundaries are finalized.",
     "agentName": "Agent Name",
     "agentNamePlaceholder": "Name your Agent",
     "agentType": "Listing Type",
@@ -788,7 +788,7 @@
         "MAINTENANCE": "Maintenance",
         "RETIRED": "Retired"
       },
-      "fired": "You are fired",
+      "fired": "Remove from active roster",
       "reactivate": "Reactivate",
       "softRetireNote": "Soft retirement is a logical elimination: only the lifecycle state changes; the profile and history are kept and can be restored via \"Reactivate\"."
     },

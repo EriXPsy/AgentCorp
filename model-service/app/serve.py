@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
-from .routes import arena, convergence, evaluate, growth, health, judge, leaderboard, samples, upload
+from .routes import arena, convergence, designer_route, evaluate, growth, health, judge, leaderboard, samples, upload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,7 +37,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("serve")
 
-app = FastAPI(title="AgentCorp MiniCPM-o Evaluator", version="0.1.0")
+app = FastAPI(title="AgentCorp Evaluation Service", version="0.1.0")
 
 # JudgeRegistry 启动注册：所有 Tier 2 主观评分模块在此收口。
 # 新增 Evaluator 必须登记到 evaluators/__init__.py，否则 CI 强制失败。
@@ -83,6 +83,7 @@ app.include_router(judge.router)
 app.include_router(growth.router)
 app.include_router(health.router)
 app.include_router(arena.router)
+app.include_router(designer_route.router)
 
 
 class SPAStaticFiles(StaticFiles):

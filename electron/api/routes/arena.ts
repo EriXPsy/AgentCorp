@@ -6,7 +6,7 @@
  *   POST /api/arena/compare    → model-service /api/arena/compare
  *   POST /api/arena/user-pick  → model-service /api/arena/user-pick
  *
- * 鉴权：沿用 server.ts 统一 isAuthorizedHostApiRequest（x-clawx-host-session）。
+ * 鉴权：沿用 server.ts 统一 isAuthorizedHostApiRequest（x-agentcorp-host-session）。
  * 模型服务不可达 / 非 200 时透传上游状态码（503/404/409/422/502 语义见契约 §0）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';

@@ -7,7 +7,7 @@
  * Port configuration
  *
  * MCP 等价契约：以下三个端口共同构成 AgentCorp 的「MCP 等价层」——
- *   :3210 CLAWX_HOST_API   Electron Host API（REST，鉴权头 x-clawx-host-session）
+ *   :3210 CLAWX_HOST_API   Electron Host API（REST，鉴权头 x-agentcorp-host-session）
  *   :18789 OPENCLAW_GATEWAY OpenClaw 网关（WS RPC 帧 {type,id,method,params}）
  *   :8000 model-service    Python 评分/评委后端（端口定义见 electron/utils/store.ts）
  * 完整 tool schema（evaluate.run / judge.chat / craft.judge / arena.* / agents.* /

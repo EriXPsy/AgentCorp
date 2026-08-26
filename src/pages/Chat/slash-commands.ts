@@ -53,12 +53,12 @@ export const CHAT_INPUT_SLASH_COMMANDS: ChatInputSlashCommand[] = [
   {
     key: 'memory',
     name: '/memory',
-    description: 'Open memory page',
+    description: 'Open memory and knowledge settings',
   },
   {
     key: 'cron',
     name: '/cron',
-    description: 'Open cron scheduler',
+    description: 'Open workforce planning',
   },
   {
     key: 'settings',
