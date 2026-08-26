@@ -27,6 +27,7 @@ from app.scoring.designer import (
 )
 from app.scoring.evaluator_protocol import EvaluatorInput
 from app.scoring.team_style import TeamStyleProfile
+from app.scoring.style_memory import StyleMemory
 
 
 # ======================================================================
@@ -60,6 +61,36 @@ def test_build_prompt_available_dims():
 
     assert "code_runnability" in prompt
     assert "code_security" in prompt
+
+
+# ======================================================================
+# 1c) route 层 _memory_to_profile：job_type 透传（防硬编码 "code" 回归）
+# ======================================================================
+def test_memory_to_profile_honors_job_type():
+    """_memory_to_profile 必须把 job_type 透传给 TeamStyleProfile，不能硬编码 "code"。
+
+    回归背景：原实现 primary_job_type="code" 硬编码，text/image 团队也会拿到 code 题。
+    """
+    from app.routes.designer_route import _memory_to_profile
+
+    memory = StyleMemory(team_id="team-text")
+    memory.current_understanding = "擅长文案"
+    memory.next_challenge_hypothesis = "下次考结构化输出"
+
+    for jt in ("code", "text", "image"):
+        profile = _memory_to_profile(memory, job_type=jt)
+        assert profile.primary_job_type == jt, f"job_type={jt} 未被透传"
+        assert profile.team_id == "team-text"
+        # 语义信息仍进入 experience_lessons
+        assert "擅长文案" in profile.experience_lessons
+
+
+def test_memory_to_profile_default_job_type_is_code():
+    """缺省 job_type 仍为 code（向后兼容无 job_type 的旧调用方）。"""
+    from app.routes.designer_route import _memory_to_profile
+
+    memory = StyleMemory(team_id="t")
+    assert _memory_to_profile(memory).primary_job_type == "code"
 
 
 # ======================================================================

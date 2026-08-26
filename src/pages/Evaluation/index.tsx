@@ -92,6 +92,7 @@ export function Evaluation() {
     streaming,
     error,
     narrationText,
+    lastTranscript,
     voiceEnabled,
     passKResult,
     passKRunning,
@@ -172,6 +173,9 @@ export function Evaluation() {
   const designerFetchMemory = useDesignerStore((s) => s.fetchMemory);
   const designerReflect = useDesignerStore((s) => s.reflect);
   const designerReset = useDesignerStore((s) => s.reset);
+  // SPADE 闭环（A1）：Designer 出的自适应题。存在时作为本次评估的任务喂给
+  // runEvaluation——否则 Designer 出题只在 StyleMemoryPanel 展示、从不被执行。
+  const currentChallenge = useDesignerStore((s) => s.currentChallenge);
 
   // Designer 记忆：选中 agent 变化时同步 teamId 并加载 StyleMemory
   useEffect(() => {
@@ -245,9 +249,17 @@ export function Evaluation() {
       sessionKey: session?.sessionKey ?? '',
       sessionId: session?.sessionId ?? '',
       taskId: '',
-      task: taskTitle.trim()
-        ? { title: taskTitle.trim(), description: '', weight: 1 }
-        : undefined,
+      // SPADE 闭环（A1）：Designer 出自适应题时，用它作为本次评估任务（prompt 作
+      // description 喂给裁判）；否则回退用户手输的 taskTitle。让「出题→执行」成环。
+      task: currentChallenge?.prompt
+        ? {
+            title: currentChallenge.title,
+            description: currentChallenge.prompt,
+            weight: 1,
+          }
+        : taskTitle.trim()
+          ? { title: taskTitle.trim(), description: '', weight: 1 }
+          : undefined,
       persona: agent.persona,
       // A · 老板原型：把当前激活的用户个性化画像带入评估（区别于 agent 自身 persona）
       bossProfile: getActiveBossProfile(),
@@ -260,10 +272,17 @@ export function Evaluation() {
         ? { ...profile.radarLatest }
         : {};
       const outcome = profile.lifecycle === 'RETIRED' ? 'failed' : 'passed';
+      // SPADE 闭环（A2）：把本次评估采集到的真实 transcript 作为 answer 喂给
+      // Reflector（runEvaluation 已把它缓存在 lastTranscript）。此前硬编码 '' 让
+      // Reflector 只能泛泛而谈，现在它能 cite 具体代码模式。封顶避免 transcript 过长
+      // 撑爆 LLM 上下文。反思任务身份优先用 Designer 题的 task_id，对齐出题记录。
+      const submissionAnswer = (lastTranscript ?? '').slice(0, 4000);
+      const reflectTaskId =
+        currentChallenge?.task_id ?? taskTitle.trim() ?? 'adhoc_eval';
       void designerReflect(
         agent.id,
-        taskTitle.trim() || 'adhoc_eval',
-        '', // answer 由主进程 transcript 采集，此处留空让后端从 performance_log 推断
+        reflectTaskId,
+        submissionAnswer,
         radarScores,
         outcome,
       );

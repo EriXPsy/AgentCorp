@@ -137,10 +137,12 @@ def _save_agent_memory(memory: "AgentMemory") -> None:
             logger.error("Failed to save AgentMemory to %s: %s", path, exc)
 
 
-def _memory_to_profile(memory: StyleMemory) -> TeamStyleProfile:
+def _memory_to_profile(memory: StyleMemory, job_type: str = "code") -> TeamStyleProfile:
     """从 StyleMemory 构建 minimal TeamStyleProfile，供 Designer 出题用。
 
     将语义记忆中的涌现信息喂回 Designer，让它基于「理解」而非固定指标出题。
+    job_type 由调用方（ChallengeRequest / prescreen）显式传入，不再硬编码 "code"——
+    否则多工种团队（text/image）也会拿到 code 题，Designer 的 JOB_CRAFT_DIMS 选错维度。
     """
     # 从 performance_log 估算通过率
     outcomes = [p.get("outcome", "") for p in memory.performance_log if p.get("outcome")]
@@ -150,7 +152,7 @@ def _memory_to_profile(memory: StyleMemory) -> TeamStyleProfile:
     return TeamStyleProfile(
         team_id=memory.team_id,
         declared_focus=memory.current_understanding,  # 用涌现理解替代用户声明
-        primary_job_type="code",  # 目前只支持 code；后续可从 memory 推断
+        primary_job_type=job_type,
         member_count=0,           # route 层不直接知道成员数
         eval_count=memory.reflection_count,
         task_types_seen=list(memory.challenges_issued),
@@ -233,16 +235,20 @@ async def create_challenge(req: ChallengeRequest) -> ChallengeResponse:
     if memory is None:
         memory = StyleMemory(team_id=req.team_id)
 
-    # 从记忆构建 profile
-    profile = _memory_to_profile(memory)
+    # 从记忆构建 profile（job_type 由请求透传，多工种团队拿到对应工种的题）
+    profile = _memory_to_profile(memory, job_type=req.job_type)
     if req.description and not memory.current_understanding:
         profile.declared_focus = req.description
     if req.member_count:
         profile.member_count = req.member_count
 
-    # Designer 出题
+    # Designer 出题。validate=True：面向用户的 /challenge 端点必须校验生成的
+    # test_harness 可执行（_validate_harness 内部用恒等 stub 跑一遍， harness 本身
+    # 语法错误会把 spec 标记为不可用）。沙箱不可用时 _validate_harness 静默降级，
+    # 不阻塞出题——与 DesignerEvaluator.evaluate 走 validate=True 的行为对齐，消除
+    # 两个入口的行为分叉（原 validate=False 让 /challenge 可能返回跑不起来的 harness）。
     try:
-        challenge = design_challenge(profile, validate=False)
+        challenge = design_challenge(profile, validate=True)
     except JudgeUnavailable as exc:
         raise HTTPException(
             status_code=503,

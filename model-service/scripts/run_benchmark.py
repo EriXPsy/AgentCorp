@@ -63,7 +63,7 @@ except ImportError:
 
 from app.config import settings  # noqa: E402
 from app.judge_backend import get_backend, JudgeUnavailable  # noqa: E402
-from app.sandbox.runner import SandboxResult  # noqa: E402
+from app.sandbox.runner import SandboxResult, extract_python_blocks  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,6 +75,22 @@ logger = logging.getLogger("benchmark")
 # ── Paths ─────────────────────────────────────────────────────────────────
 BENCHMARK_DIR = _ROOT / "data" / "benchmarks"
 EXPERIMENT_DIR = _ROOT / "data" / "experiments"
+
+
+def _strip_fences(text: str) -> str:
+    """剥掉模型输出上的 markdown 代码围栏，只保留 Python 代码本身。
+
+    复现性闸门（E0）确认的坑：glm-4-flash 等模型即使被 system prompt 明确要求
+    「不要输出围栏」，仍经常用 ```python ... ``` 包裹答案。run_benchmark_answer 会把
+    原始输出原样写进 solution.py，而 _make_benchmark_spec 的 harness 执行
+    `from solution import entry_point`——首行是围栏就直接 ImportError，被判 failed，
+    系统性压低 pass@k（正确的解被误杀）。
+
+    复用 extract_python_blocks：优先取 ``` 围栏块；围栏不在时若整段像代码就整体保留。
+    多块（少见）用空行拼接，保证 import/def 结构完整。
+    """
+    blocks = extract_python_blocks(text or "")
+    return "\n\n".join(blocks) if blocks else (text or "")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -132,9 +148,19 @@ def _make_benchmark_spec(task_id: str, test_code: str, entry_point: str):
         '# -I mode strips cwd from sys.path — restore it (sandbox sets cwd=workdir)\n'
         'sys.path.insert(0, os.getcwd())\n'
         '\n'
-        '# Step 1: Import the candidate solution\n'
+        '# Step 1: Import the candidate solution as a module, then expose ALL its\n'
+        '# public names into this harness namespace.\n'
+        '#\n'
+        '# 为什么不能只 `from solution import {entry_point}`：HumanEval 的 test 经常\n'
+        '# 直接调用 solution 里除 entry_point 之外的辅助函数（如 HumanEval/32 的 test\n'
+        '# 调用 poly），这些名字只存在于 solution 模块。若只导入单个入口函数，test 里\n'
+        '# 对辅助函数的裸名调用会 NameError → 正确的解被误判 failed。把 solution 的\n'
+        '# 全部公开名注入 harness globals，test 的裸名解析才能命中。\n'
         'try:\n'
-        f'    from solution import {entry_point}\n'
+        '    import solution as _solution_module\n'
+        '    for _n in dir(_solution_module):\n'
+        '        if not _n.startswith(\"_\"):\n'
+        '            globals()[_n] = getattr(_solution_module, _n)\n'
         'except ImportError as exc:\n'
         '    print("HARNESS_IMPORT_ERROR " + type(exc).__name__)\n'
         '    print("HARNESS_DONE total=0 failed=1")\n'
@@ -226,6 +252,9 @@ def run_single_problem(
         }
 
     # ── 2. Build answer for sandbox ─────────────────────────────────────
+    # 先剥围栏（E0 复现性闸门）：写进 solution.py 的绝不能含 ``` 代码围栏，
+    # 否则 harness 的 `from solution import entry_point` 会 ImportError 误判 failed。
+    model_output = _strip_fences(model_output)
     # The model is instructed to output the complete function.
     # If it only outputs the body (no def line), prepend the prompt.
     stripped = model_output.lstrip()
