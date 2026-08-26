@@ -215,10 +215,10 @@ flowchart LR
 |---|---|
 | Routing | `src/engine/squad/squadRouting.ts` |
 | Task claiming / execution loop | `src/stores/autoWorker.ts` |
-| Team orchestration | `src/engine/squad/squadOrchestration.ts` |
+| Team orchestration | `src/engine/squad/squadOrchestration.ts`, `src/services/team/team-execution.ts` |
 | Runtime session tracking | `electron/services/session-runtime-manager.ts` |
 | Task persistence | `electron/utils/task-config.ts`, `src/stores/approvals.ts` |
-| Operator view | `src/pages/Office/TaskBoard.tsx`, `src/pages/Office/index.tsx` |
+| Operator view | `src/pages/Office/TaskBoard.tsx`, `src/pages/Office/index.tsx`, `src/pages/Chat/TeamChatView.tsx` |
 
 ## 4.3 Operate → Learn
 
@@ -238,6 +238,7 @@ flowchart LR
 | Step | Main modules |
 |---|---|
 | Work outcome → evaluation | `src/services/workEvaluationLoop.ts`, `src/stores/evaluation.ts` |
+| Team delivery → room + experience loop | `src/services/team/team-execution.ts`, `src/stores/teamChatWorkOrder.ts`, `src/stores/autoWorker.ts` |
 | Performance aggregation | `src/stores/performance.ts` |
 | Team experience reflection | `src/stores/experience.ts` |
 | Preference learning | `src/stores/scoringStore.ts`, `model-service/app/scoring/preference.py` |
@@ -507,6 +508,20 @@ Reference pattern now in progress:
 - overview tables should render from projected workforce assets and KPI summaries, not rebuild team/agent joins inline in the page
 - team-map interaction helpers (fallback activity state, next-step text, hover anchor projection, owned entry points) should live outside the page component
 - radar drawers should distinguish between loading and no-data states so operating surfaces stay truthful
+
+### Team execution / learning wiring
+Current:
+- `src/stores/autoWorker.ts`
+- `src/stores/teamChatWorkOrder.ts`
+- `src/pages/Chat/TeamChatView.tsx`
+
+Recommended extraction targets:
+- `src/services/team/team-execution.ts`
+
+Reference pattern now in progress:
+- team orchestration setup (personas + performance snapshot + experience injection) should be shared across task-board execution and team-room execution
+- team delivery persistence, room broadcast, and experience reflection should flow through one service entry instead of being duplicated in multiple execution channels
+- operate → learn wiring should stay best-effort but consistent, so adding a new team execution surface does not require copy-pasting the learning loop
 
 ### Runtime domain
 Current: `src/stores/autoWorker.ts`

@@ -29,9 +29,14 @@ import { useTeamsStore } from '@/stores/teams';
 import { useChatStore } from '@/stores/chat';
 import { useEvaluationStore } from '@/stores/evaluation';
 import { evaluateCompletedWork } from '@/services/workEvaluationLoop';
-import { usePerformanceStore, subtasksToOutcomes } from '@/stores/performance';
-import { useExperienceStore, buildExperienceText, reflectExperience } from '@/stores/experience';
+import { usePerformanceStore } from '@/stores/performance';
 import { toPerformance } from '@/types/performance';
+import {
+  buildTeamDeliveryArtifacts,
+  prepareTeamExecutionResources,
+  recordTeamExecutionOutcomes,
+  syncTeamDeliveryToLearningLoop,
+} from '@/services/team/team-execution';
 import type { KanbanTask } from '@/types/task';
 import {
   routeBySquadLeader,
@@ -44,8 +49,6 @@ import {
   type SubTaskResult,
 } from '@/engine/squad/squadOrchestration';
 import { createRoomTraceForwarder } from '@/stores/teamRoomBroadcast';
-import { buildDeliverableFiles } from '@/engine/squad/deliverableFiles';
-import { invokeIpc } from '@/lib/api-client';
 import { notifyTaskTerminal } from '@/lib/task-notify';
 import { persistA2aTrace } from '@/lib/a2a-trace-persist';
 import type { Team } from '@/types/team';
@@ -589,25 +592,14 @@ async function runOne(
           const sink = createThrottledEventSink(task.id);
           // P0-3：里程碑 trace 实时广播到团队房间（仅团队任务；失败静默）
           const forwardRoom = task.teamId ? createRoomTraceForwarder(task.teamId) : null;
-          const memberIds = Array.from(new Set([...(team.memberIds ?? []), team.leaderId]));
-          // 注入各成员 persona（SOUL.md 摘要）；读不到为 null，编排器退回纯身份说明。
-          const personas: Record<string, string | null> = {};
-          await Promise.all(
-            memberIds.map(async (aid) => {
-              personas[aid] = await useAgentsStore
-                .getState()
-                .getAgentPersona(aid)
-                .catch(() => null);
-            }),
-          );
+          const executionResources = await prepareTeamExecutionResources({
+            id: team.id,
+            name: team.name,
+            leaderId: team.leaderId,
+            memberIds: team.memberIds,
+          });
           let orch: Awaited<ReturnType<typeof runSquadOrchestration>>;
           try {
-            // D：编排前拉最新绩效快照（projectRoutingCandidates 注入 performance；失败静默）
-            await usePerformanceStore.getState().fetchMemberStats();
-            // F：编排前注入团队经验卡（Reflexion 式记忆，arXiv:2303.11366）；无卡/拉取失败 → 不注入
-            const experienceText = buildExperienceText(
-              await useExperienceStore.getState().getExperience(team.id),
-            );
             // C/F 契约字段：qualityMode（双草案高质量模式）+ experience（团队经验卡）
             orch = await runSquadOrchestration({
               taskId: task.id,
@@ -615,12 +607,14 @@ async function runOne(
               taskDescription: task.description,
               team,
               candidates: projectRoutingCandidates(team),
-              personas,
+              personas: executionResources.personas,
               maxRounds: 3,
               // C：高优先级任务走双草案高质量模式
               qualityMode: task.priority === 'high',
               // F：团队经验卡文本（最近 10 条，每行「- 内容」）
-              ...(experienceText ? { experience: experienceText } : {}),
+              ...(executionResources.experienceText
+                ? { experience: executionResources.experienceText }
+                : {}),
               // 注入真实 LLM 执行；persona/身份由编排器拼进 system 消息。
               // ctx 透传给用量采集（成本看板按 task/team/agent 归集）。
               // maxTokens 8192：长交付物需要足够输出额度，2048 会腰斩；
@@ -638,27 +632,15 @@ async function runOne(
           }
           orchSubtasks = orch.subtasks;
           // D：编排结果按子任务归集成成员绩效上报（fire-and-forget，失败静默）
-          void usePerformanceStore.getState().recordOutcomes(subtasksToOutcomes(orch.subtasks));
-          const passed = orch.subtasks.filter((s) => s.approved).length;
-          const failedCount = orch.subtasks.filter((s) => s.error).length;
-          realOutput =
-            `【团队协同·${team.name}·${orch.subtasks.length} 个子任务：${passed} 通过` +
-            `${failedCount ? `，${failedCount} 失败` : ''}】\n${orch.deliverable}`;
-          // 交付文件落盘：各子任务完整产出（含代码全文）写成真实文件，
-          // HTML 可直接双击运行；落盘失败不阻塞交付，仅不附目录。
-          try {
-            const files = buildDeliverableFiles(orch.subtasks, orch.deliverable);
-            const saved = await invokeIpc<{ success: boolean; dir?: string; saved?: string[] }>(
-              'task:saveDeliverables',
-              { taskId: task.id, files },
-            );
-            if (saved.success && saved.dir) {
-              deliverableDir = saved.dir;
-              realOutput += `\n\n---\n📁 ${saved.saved?.length ?? 0} 个交付文件已保存到本地，点下方「打开交付目录」查看/运行。`;
-            }
-          } catch {
-            /* 落盘失败不阻塞交付 */
-          }
+          recordTeamExecutionOutcomes(orch.subtasks);
+          const delivery = await buildTeamDeliveryArtifacts({
+            taskId: task.id,
+            teamName: team.name,
+            subtasks: orch.subtasks,
+            deliverable: orch.deliverable,
+          });
+          realOutput = delivery.output;
+          deliverableDir = delivery.deliverableDir;
         } else if (routing.collaborate && routing.leaderId && resolvedAssigneeId) {
           // —— 多 agent A2A 协作：leader 分派 → 成员执行 → leader 审阅（可返工）——
           const sink = createThrottledEventSink(task.id);
@@ -789,30 +771,16 @@ async function runOne(
     }
     // 系统通知：真实执行跑完进评审列，提醒用户验收（点击通知直达任务详情）
     notifyTaskTerminal(task.id, 'done', task.title);
-    // 团队任务的交付同步到团队房间：与会话派活同一份内容，房间里直接可见
+    // 团队任务的交付同步到团队房间，并触发 leader 视角经验反思（operate → learn）
     if (task.teamId) {
-      await useTeamsStore
-        .getState()
-        .appendTeamChatEvent(task.teamId, {
-          from: team?.leaderId ?? resolvedAssigneeId ?? task.teamId,
-          to: 'user',
-          content:
-            `「${task.title}」交付完成，请验收：\n\n${realOutput.slice(0, 4000)}` +
-            `\n\n> 交付文件在任务会话/看板任务详情里可直接打开或下载 ZIP。`,
-        })
-        .catch(() => { /* 房间同步失败不阻塞交付 */ });
-      // F：交付后 leader 视角复盘一条经验卡（≤150 字，source 记 taskId），
-      //    Reflexion 式记忆闭环（arXiv:2303.11366）；失败静默不阻塞交付。
-      if (team?.leaderId && orchSubtasks?.length) {
-        void reflectExperience({
-          teamId: task.teamId,
-          taskId: task.id,
-          taskTitle: task.title,
-          subtasks: orchSubtasks,
-          chat: (messages) =>
-            runRealChat(messages, 512, { taskId: task.id, teamId: task.teamId, agentId: team.leaderId }),
-        });
-      }
+      await syncTeamDeliveryToLearningLoop({
+        teamId: task.teamId,
+        leaderId: team?.leaderId ?? null,
+        taskId: task.id,
+        taskTitle: task.title,
+        realOutput,
+        subtasks: orchSubtasks,
+      });
     }
     release();
     void get()._tick(); // 立即补槽
