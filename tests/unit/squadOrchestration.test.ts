@@ -8,6 +8,7 @@ import {
   runSquadOrchestration,
   parseSubTasks,
   classifySubTaskKind,
+  type AgentSpeakEvent,
   type OrchestrationInput,
 } from "../../src/engine/squad/squadOrchestration";
 import type { ChatFn, ChatMessage } from "../../src/engine/squad/squadCollaboration";
@@ -1094,5 +1095,59 @@ describe("P1-2 动态成员圈选（工种预筛）", () => {
       }),
     );
     expect(result.subtasks[0].assigneeId).toBe("m2");
+  });
+});
+
+describe("onAgentSpeak 实况发言回调", () => {
+  const decompose2 = JSON.stringify([
+    { title: "调研 A", instruction: "调研竞品 A", assigneeId: "m1" },
+    { title: "调研 B", instruction: "调研竞品 B", assigneeId: "m2" },
+  ]);
+
+  it("关键阶段按序触发：decompose/assign/execute/review/summarize 均有事件，成员各自有 execute 全生命周期", async () => {
+    const events: AgentSpeakEvent[] = [];
+    const chat = scriptedChat({ decompose: decompose2 });
+    await runSquadOrchestration(baseInput({ chat, onAgentSpeak: (ev) => events.push(ev) }));
+
+    const keys = events.map((e) => `${e.agentId}:${e.phase}:${e.kind}`);
+    // leader 的拆解先于汇总
+    expect(keys).toContain("leader:decompose:start");
+    expect(keys).toContain("leader:decompose:end");
+    expect(keys).toContain("leader:summarize:start");
+    expect(keys).toContain("leader:summarize:end");
+    expect(keys.indexOf("leader:decompose:start")).toBeLessThan(keys.indexOf("leader:summarize:start"));
+
+    // 两个成员各自有 execute 的 start/update/end（房间并发直播槽位的数据源）
+    for (const mid of ["m1", "m2"]) {
+      expect(keys).toContain(`${mid}:execute:start`);
+      expect(keys).toContain(`${mid}:execute:update`);
+      expect(keys).toContain(`${mid}:execute:end`);
+    }
+    // assign 阶段逐子任务一条 update
+    expect(events.filter((e) => e.phase === "assign" && e.kind === "update")).toHaveLength(2);
+    // review 有 start 与 end
+    expect(keys).toContain("leader:review:start");
+    expect(keys).toContain("leader:review:end");
+  });
+
+  it("onAgentSpeak 抛异常被吞掉，不影响编排主流程", async () => {
+    const chat = scriptedChat({ decompose: decompose2 });
+    const result = await runSquadOrchestration(
+      baseInput({
+        chat,
+        onAgentSpeak: () => {
+          throw new Error("UI boom");
+        },
+      }),
+    );
+    expect(result.deliverable).toBe("汇总交付物");
+    expect(result.subtasks).toHaveLength(2);
+  });
+
+  it("不传 onAgentSpeak 时编排行为不变（可选回调）", async () => {
+    const chat = scriptedChat({ decompose: decompose2 });
+    const result = await runSquadOrchestration(baseInput({ chat }));
+    expect(result.subtasks).toHaveLength(2);
+    expect(result.deliverable).toBe("汇总交付物");
   });
 });

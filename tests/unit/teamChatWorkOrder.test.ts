@@ -52,7 +52,12 @@ vi.mock('@/stores/approvals', () => ({
 }));
 vi.mock('@/stores/teams', () => ({
   useTeamsStore: {
-    getState: () => ({ teams: [team], appendTeamChatEvent: appendTeamChatEventMock }),
+    getState: () => ({
+      teams: [team],
+      appendTeamChatEvent: appendTeamChatEventMock,
+      updateRoomLive: vi.fn(),
+      clearRoomLive: vi.fn(),
+    }),
   },
 }));
 vi.mock('@/stores/agents', () => ({

@@ -82,3 +82,36 @@ describe('runRealChat 既有语义', () => {
     await expect(runRealChat([{ role: 'user', content: 'hi' }])).rejects.toThrow('空产出');
   });
 });
+
+describe('runRealChat 流式兜底（onDelta）', () => {
+  it('拿到全文后逐段 reveal：onDelta 累积单调递增、末次即全文、返回值不变', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ content: '第一段。第二段，第三段！' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const seen: string[] = [];
+    const result = await runRealChat([{ role: 'user', content: 'hi' }], 2048, 10_000, undefined, {
+      onDelta: (acc) => seen.push(acc),
+      revealIntervalMs: 1,
+    });
+
+    expect(result).toBe('第一段。第二段，第三段！');
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen[seen.length - 1]).toBe(result);
+    for (let i = 1; i < seen.length; i += 1) {
+      expect(seen[i].startsWith(seen[i - 1])).toBe(true);
+    }
+  });
+
+  it('不传 stream 选项时 fetch 只调一次、直接返回（既有行为不变）', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ content: 'ok' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runRealChat([{ role: 'user', content: 'hi' }])).resolves.toBe('ok');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

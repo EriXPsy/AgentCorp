@@ -2,7 +2,8 @@
  * tests/unit/teamRoomBroadcast.test.ts
  *
  * P0-3 协作过程实时广播单测：
- * - isMilestoneTrace：里程碑 summary / failed 状态命中，高频非里程碑不命中
+ * - isMilestoneTrace：里程碑 summary / failed 状态命中，高频非里程碑不命中；
+ *   P2 起「成员回交产出」放宽为里程碑（成员产出房间可见）
  * - createRoomTraceForwarder：from/to 映射（agent: 前缀剥离、team: → leaderId）、
  *   非里程碑不转发、广播写 appendTeamChatEvent（PUT 持久化）
  *
@@ -102,9 +103,14 @@ describe('isMilestoneTrace 里程碑过滤', () => {
     expect(isMilestoneTrace(makeTrace({ summary: '「a」执行失败：LLM 超时', state: 'failed' }))).toBe(true);
   });
 
-  it('非里程碑（成员回交产出等高频事件）不命中', () => {
-    expect(isMilestoneTrace(makeTrace({ summary: '「a」成员回交产出（第1轮）：产出片段' }))).toBe(false);
-    expect(isMilestoneTrace(makeTrace({ summary: '「a」成员回交产出（第2轮）：修订片段', state: 'working' }))).toBe(false);
+  it('非里程碑（无里程碑关键词的高频中间态）不命中', () => {
+    expect(isMilestoneTrace(makeTrace({ summary: '「a」正在生成产出…', state: 'working' }))).toBe(false);
+    expect(isMilestoneTrace(makeTrace({ summary: '「a」调用工具：read_file', state: 'working' }))).toBe(false);
+  });
+
+  it('成员回交产出（P2 放宽为里程碑）命中，房间可见', () => {
+    expect(isMilestoneTrace(makeTrace({ summary: '「a」成员回交产出（第1轮）：产出片段' }))).toBe(true);
+    expect(isMilestoneTrace(makeTrace({ summary: '「a」成员回交产出（第2轮）：修订片段', state: 'working' }))).toBe(true);
   });
 });
 
@@ -113,7 +119,7 @@ describe('createRoomTraceForwarder', () => {
     const forward = createRoomTraceForwarder('team-a');
     forward(makeTrace({ delegator: 'agent:leader-1', summary: 'Leader 拆解任务为 2 个子任务：a；b' }));
     // 非里程碑不转发
-    forward(makeTrace({ delegator: 'agent:m-1', summary: '「a」成员回交产出（第1轮）：xx' }));
+    forward(makeTrace({ delegator: 'agent:m-1', summary: '「a」正在生成产出…', state: 'working' }));
 
     await vi.waitFor(() => expect(appendCalls).toHaveLength(1));
     expect(appendCalls[0].teamId).toBe('team-a');

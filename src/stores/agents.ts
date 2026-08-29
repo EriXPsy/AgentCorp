@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { invokeIpc } from '@/lib/api-client';
+import { deriveBusyAgentIds } from '@/lib/team-roster';
+import { useApprovalsStore } from '@/stores/approvals';
 import type { ChannelType } from '@/types/channel';
 import type { AgentChatAccess, AgentLifecycleStatus, AgentRoleCardInput, AgentSummary, AgentsSnapshot, AgentTeamRole } from '@/types/agent';
 
@@ -50,11 +52,12 @@ interface AgentsState {
 }
 
 function applySnapshot(snapshot: AgentsSnapshot | undefined) {
+  // 浏览器预览 shim 可能返回 200 空对象：各字段兜底，防消费方 .map/.forEach 白屏。
   return snapshot ? {
-    agents: snapshot.agents,
-    defaultAgentId: snapshot.defaultAgentId,
-    configuredChannelTypes: snapshot.configuredChannelTypes,
-    channelOwners: snapshot.channelOwners,
+    agents: snapshot.agents ?? [],
+    defaultAgentId: snapshot.defaultAgentId ?? null,
+    configuredChannelTypes: snapshot.configuredChannelTypes ?? [],
+    channelOwners: snapshot.channelOwners ?? {},
   } : {};
 }
 
@@ -227,13 +230,15 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   fetchAgentStatuses: async () => {
-    // Simplified implementation: default all agents to online
-    // If Gateway provides agent status API in the future, fetch from there
+    // 忙闲派生：任一 in-progress 看板任务的 assignee → busy；
+    // 其余沿用已有基础状态（默认 online，人工标记的 offline 不被任务推导覆盖）。
+    // Gateway 若以后提供状态 API，可在此基础上叠加。
+    const busyIds = deriveBusyAgentIds(useApprovalsStore.getState().tasks);
     set((state) => {
       const statuses: Record<string, 'online' | 'offline' | 'busy'> = {};
       for (const agent of state.agents) {
-        // Default to online if not already set
-        statuses[agent.id] = state.agentStatuses[agent.id] || 'online';
+        const prev = state.agentStatuses[agent.id] || 'online';
+        statuses[agent.id] = prev === 'offline' ? 'offline' : busyIds.has(agent.id) ? 'busy' : 'online';
       }
       return { agentStatuses: statuses };
     });

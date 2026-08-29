@@ -445,6 +445,34 @@ export function isTaskProtocolContent(content: string): boolean {
   return content.startsWith(TASK_DRAFT_PREFIX) || content.startsWith(TASK_DRAFT_RESOLUTION_PREFIX);
 }
 
+// ── 草稿确认卡倒计时（纯前端渲染层，不进协议）──────────────────────
+// 老板 15 分钟内未处置的草稿视为过期：卡片转「已超时」终态、按钮禁用。
+// 倒计时只按草稿事件的 createdAt 在前端计算，不落任何协议事件。
+
+export const TASK_DRAFT_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** 确认卡阶段：已有处置 → 处置终态；超时未处置 → expired；否则 pending。 */
+export type TaskDraftPhase = TaskDraftAction | 'pending' | 'expired';
+
+export function getTaskDraftPhase(
+  resolution: TaskDraftAction | null | undefined,
+  createdAt: string | undefined,
+  now: number,
+): TaskDraftPhase {
+  if (resolution) return resolution;
+  const created = createdAt ? Date.parse(createdAt) : NaN;
+  if (Number.isFinite(created) && now - created >= TASK_DRAFT_TIMEOUT_MS) return 'expired';
+  return 'pending';
+}
+
+/** 倒计时剩余毫秒 → mm:ss（负值按 0 计）。 */
+export function formatDraftRemainingMs(remainingMs: number): string {
+  const totalSec = Math.max(0, Math.ceil(remainingMs / 1000));
+  const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
+  const ss = String(totalSec % 60).padStart(2, '0');
+  return `${mm}:${ss}`;
+}
+
 /** 汇总草稿处置状态：同一 id 多条处置时最新一条生效。 */
 export function collectTaskDraftResolutions(
   events: Array<{ content: string }>,

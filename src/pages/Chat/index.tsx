@@ -15,6 +15,8 @@ import { useRightPanelStore } from '@/stores/rightPanelStore';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextRail } from '@/components/workbench/context-rail';
 import { ChatMainArea } from '@/components/chat/ChatMainArea';
+import { TeamRosterPanel } from '@/components/chat/TeamRosterPanel';
+import type { RosterMember } from '@/lib/team-roster';
 import { isSystemInjectedUserMessage, extractReminderContent } from './message-utils';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -30,6 +32,10 @@ export function Chat() {
   const navigate = useNavigate();
   const rightPanelMode = useSettingsStore((s) => s.rightPanelMode);
   const openPanel = useRightPanelStore((s) => s.openPanel);
+  // 成员花名册右栏：由 TeamChatView 头部头像叠放区打开（rightPanelStore type='roster'）
+  const rightPanelType = useRightPanelStore((s) => s.type);
+  const rosterTeamId = useRightPanelStore((s) => s.teamId);
+  const closeRightPanel = useRightPanelStore((s) => s.closePanel);
 
   const messages = useChatStore((s) => s.messages);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
@@ -92,6 +98,20 @@ export function Chat() {
     void fetchAgents();
     void fetchTeams();
   }, [fetchAgents, fetchTeams]);
+
+  // 花名册成员 → 私聊（与 TeamChatView 原头部私聊按钮同逻辑）
+  const handleRosterDirectChat = (member: RosterMember) => {
+    const team = teams.find((t) => t.id === rosterTeamId);
+    try {
+      useChatStore.getState().openDirectAgentSession(member.id, {
+        teamId: team?.id ?? rosterTeamId ?? undefined,
+        teamName: team?.name,
+        isLeaderChat: member.id === team?.leaderId,
+      });
+    } catch {
+      /* agent 不存在时忽略 */
+    }
+  };
 
   // 团队房间：为每个团队确保一条会话条目（组建团队即出现在会话列表）
   useEffect(() => {
@@ -225,6 +245,13 @@ export function Chat() {
           />
 
           {rightPanelMode !== null && <ContextRail />}
+          {rightPanelType === 'roster' && rosterTeamId && (
+            <TeamRosterPanel
+              teamId={rosterTeamId}
+              onClose={closeRightPanel}
+              onDirectChat={handleRosterDirectChat}
+            />
+          )}
         </div>
       </div>
 

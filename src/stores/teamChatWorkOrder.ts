@@ -9,6 +9,7 @@
  * 看板状态随任务状态机流转（in-progress → review）。
  */
 import { useApprovalsStore } from '@/stores/approvals';
+import { useAgentsStore } from '@/stores/agents';
 import { useTeamsStore } from '@/stores/teams';
 import {
   claimTask,
@@ -110,6 +111,24 @@ export async function runTeamChatWorkOrder(taskId: string, instruction: string):
           forwardRoom(trace);
           persistA2aTrace(trace);
         },
+        // 实况发言 → 房间「直播中」气泡（内存态 roomLive，同 agent 同槽位只更新；
+        // 成员名按 agents store 解析；回调异常绝不阻塞编排）。
+        onAgentSpeak: (ev) => {
+          try {
+            const name =
+              useAgentsStore.getState().agents.find((a) => a.id === ev.agentId)?.name
+              ?? ev.agentName
+              ?? ev.agentId;
+            useTeamsStore.getState().updateRoomLive(team.id, ev.agentId, {
+              agentName: name,
+              phase: ev.phase,
+              text: ev.text,
+              updatedAt: Date.now(),
+            });
+          } catch {
+            /* 实况转发失败不阻塞编排 */
+          }
+        },
       });
     } finally {
       await sink.flush();
@@ -152,6 +171,8 @@ export async function runTeamChatWorkOrder(taskId: string, instruction: string):
       .catch(() => {});
     throw err;
   } finally {
+    // 编排结束（成功/失败/取消）：清空该团队的全部实况槽位，避免直播气泡残留。
+    useTeamsStore.getState().clearRoomLive(team.id);
     releaseClaim(taskId);
   }
 }

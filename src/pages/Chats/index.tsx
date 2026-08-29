@@ -12,11 +12,14 @@ import { ClipboardList, MessageSquare, PanelLeftClose, PanelLeftOpen, Users } fr
 import { useTranslation } from 'react-i18next';
 
 import { ChatMainArea } from '@/components/chat/ChatMainArea';
+import { TeamRosterPanel } from '@/components/chat/TeamRosterPanel';
 import { groupChatSessions, type ChatSessionListItem } from '@/lib/chat-session-groups';
+import type { RosterMember } from '@/lib/team-roster';
 import { cn } from '@/lib/utils';
 import { useAgentsStore } from '@/stores/agents';
 import { useApprovalsStore } from '@/stores/approvals';
 import { useChatStore } from '@/stores/chat';
+import { useRightPanelStore } from '@/stores/rightPanelStore';
 import { useTeamsStore } from '@/stores/teams';
 
 /** 列表副标题：相对时间（活跃时间未知则不显示）。 */
@@ -148,6 +151,11 @@ export function Chats() {
 
   const [listOpen, setListOpen] = useState(true);
 
+  // 成员花名册右栏：团队房间头部头像叠放区打开（rightPanelStore type='roster'），与 Chat 页同款挂载
+  const rightPanelType = useRightPanelStore((s) => s.type);
+  const rosterTeamId = useRightPanelStore((s) => s.teamId);
+  const closeRightPanel = useRightPanelStore((s) => s.closePanel);
+
   useEffect(() => {
     void fetchAgents();
     void fetchTeams();
@@ -180,6 +188,20 @@ export function Chats() {
       }
     }
     switchSession(item.key);
+  };
+
+  // 花名册成员 → 私聊（与 Chat 页同逻辑）
+  const handleRosterDirectChat = (member: RosterMember) => {
+    const team = teams.find((t) => t.id === rosterTeamId);
+    try {
+      useChatStore.getState().openDirectAgentSession(member.id, {
+        teamId: team?.id ?? rosterTeamId ?? undefined,
+        teamName: team?.name,
+        isLeaderChat: member.id === team?.leaderId,
+      });
+    } catch {
+      /* agent 不存在时忽略 */
+    }
   };
 
   const totalCount = groups.teamRooms.length + groups.taskSessions.length + groups.agentSessions.length;
@@ -256,6 +278,15 @@ export function Chats() {
           teamId={currentTeamRoomId}
         />
       </div>
+
+      {/* 成员花名册右栏（团队房间头部头像区打开） */}
+      {rightPanelType === 'roster' && rosterTeamId && (
+        <TeamRosterPanel
+          teamId={rosterTeamId}
+          onClose={closeRightPanel}
+          onDirectChat={handleRosterDirectChat}
+        />
+      )}
     </div>
   );
 }

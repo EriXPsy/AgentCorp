@@ -50,12 +50,31 @@ import type { ChatFn, ChatHints, ChatMessage } from './squadCollaboration';
 import { checkCodeOutput } from './outputCheck';
 import { routeBySquadLeader, type RoutingCandidate } from './squadRouting';
 
+/** 实况发言事件：编排关键阶段的开始/进展/结束（UI 直播气泡用；纯内存，不落盘）。 */
+export type AgentSpeakPhase =
+  | 'decompose'
+  | 'assign'
+  | 'kickoff'
+  | 'execute'
+  | 'review'
+  | 'cross-review'
+  | 'replan'
+  | 'summarize';
+
+export interface AgentSpeakEvent {
+  agentId: string;
+  /** 编排器只认识 agentId；展示名由调用方（如 teamChatWorkOrder）按 agents store 解析。 */
+  agentName?: string;
+  phase: AgentSpeakPhase;
+  kind: 'start' | 'update' | 'end';
+  text: string;
+}
+
 /** leader 拆解出的一条子任务。assigneeId 可缺省（由 ASSIGN 兜底指派）。 */
 export interface OrchestrationSubTask {
   title: string;
   instruction: string;
-  assigneeId?: string;
-  /**
+  assigneeId?: string;  /**
    * A：可勾选验收标准（2~5 条，对治 MAST verification gap）。
    * 有则 leader 审阅逐条 ✓/✗，且首次 PASS 后触发一次独立盲审；缺失则无 checklist。
    */
@@ -91,6 +110,11 @@ export interface OrchestrationInput {
   chatRich?: (agentId: string, messages: ChatMessage[]) => Promise<{ content: string; finishReason: string | null }>;
   /** 每产生一条 A2A trace 时回调（用于实时展示 / 落盘）。 */
   onTrace?: (trace: A2aTraceRecord) => void;
+  /**
+   * 可选实况回调：关键阶段开始/产出摘要/结束时触发（房间「直播中」气泡用）。
+   * 纯通知性质，回调抛错一律吞掉，绝不影响编排主流程。
+   */
+  onAgentSpeak?: (ev: AgentSpeakEvent) => void;
 }
 
 export interface SubTaskResult {
@@ -411,6 +435,14 @@ export async function runSquadOrchestration(
     traces.push(t);
     input.onTrace?.(t);
   };
+  // 实况发言：UI 直播气泡的数据源（内存态）。回调异常吞掉，绝不阻塞编排。
+  const speak = (agentId: string, phase: AgentSpeakPhase, kind: AgentSpeakEvent['kind'], text: string) => {
+    try {
+      input.onAgentSpeak?.({ agentId, phase, kind, text });
+    } catch {
+      /* 实况回调不阻塞编排 */
+    }
+  };
 
   // —— E：调用预算护栏（对治 MAST arXiv:2503.13657 termination failure）——
   // 引擎内部包一层计数 chat，每调一次 +1；预算耗尽后按序降级：
@@ -454,6 +486,7 @@ export async function runSquadOrchestration(
     .map((c) => `- ${c.agentId}${c.jobType ? `（擅长工种：${c.jobType}）` : ''}${c.agentId === team.leaderId ? '（leader）' : ''}`)
     .join('\n');
   const experienceText = input.experience?.trim();
+  speak(team.leaderId, 'decompose', 'start', '正在拆解任务…');
   const decomposeRaw = await call(team.leaderId, [
     {
       role: 'system',
@@ -589,6 +622,7 @@ export async function runSquadOrchestration(
       summary: `Leader 拆解任务为 ${subtasks.length} 个子任务：${subtasks.map((s) => s.title).join('；').slice(0, 60)}`,
     }),
   );
+  speak(team.leaderId, 'decompose', 'end', `拆解为 ${subtasks.length} 个子任务，开始分派`);
 
   // —— 步骤 2：ASSIGN（校验 / 兜底指派）——
   /** 单条子任务指派：leader 指定合法则用，否则路由兜底。 */
@@ -635,7 +669,10 @@ export async function runSquadOrchestration(
     );
 
   const assigned = subtasks.map(assignOne);
-  for (const st of assigned) emitAssignTrace(st);
+  for (const st of assigned) {
+    emitAssignTrace(st);
+    speak(team.leaderId, 'assign', 'update', `「${st.title.slice(0, 24)}」交给 ${st.assigneeId}`);
+  }
 
   // —— C：qualityMode 第二草案成员挑选（排除主 assignee 与 leader，无人可选退回单草案）——
   const pickSecondDraftee = (excludeId: string, title: string, instruction: string): string | null => {
@@ -708,6 +745,7 @@ export async function runSquadOrchestration(
         break;
       }
       st.rounds += 1;
+      speak(st.assigneeId, 'execute', 'start', `正在执行「${st.title.slice(0, 24)}」（第${st.rounds}轮）…`);
 
       // EXECUTE：成员按 persona + 指令产出交付物。
       // C（MoA arXiv:2406.04692）：qualityMode 首轮双草案并行 + leader 合成最优版；
@@ -774,6 +812,7 @@ export async function runSquadOrchestration(
           reworkOf: lastReworkTrace,
         }),
       );
+      speak(st.assigneeId, 'execute', 'update', st.output.slice(0, 120));
 
       // B（MetaGPT ICLR2024 结构化交付契约）：必备部分机检，缺部分不消耗 LLM 审阅，
       // 直接记 REWORK（算一轮返工）；机检全过才进 leader 审阅。
@@ -813,6 +852,7 @@ export async function runSquadOrchestration(
       // REVIEW：leader 审阅该子任务产出；第 2 轮起带上轮意见，便于核对是否已解决。
       // P0-3 举证审阅（G-Eval）：有验收标准时要求结构化输出——逐条 ✓/✗ 并引用
       // 产出原文作证据，返工意见因此具体可执行；模型未按格式输出时回退首行契约。
+      speak(team.leaderId, 'review', 'start', `正在审阅「${st.title.slice(0, 24)}」…`);
       const reviewRaw = await call(team.leaderId, [
         {
           role: 'system',
@@ -862,6 +902,12 @@ export async function runSquadOrchestration(
         reworkOf: st.approved ? null : lastReworkTrace,
       });
       emit(reviewTrace);
+      speak(
+        team.leaderId,
+        'review',
+        'end',
+        `「${st.title.slice(0, 24)}」审阅${st.approved ? '通过' : '打回返工'}：${st.verdict.slice(0, 40)}`,
+      );
 
       if (!st.approved) {
         lastReworkTrace = reviewTrace.trace_id; // 下一轮 EXECUTE 标记为对本次的返工
@@ -916,6 +962,12 @@ export async function runSquadOrchestration(
       }
       break; // leader PASS（有 checklist 时盲审也 PASS）→ 真通过
     }
+    speak(
+      st.assigneeId,
+      'execute',
+      'end',
+      st.approved ? `「${st.title.slice(0, 24)}」通过审阅，完成` : `「${st.title.slice(0, 24)}」产出保留（未过审）`,
+    );
   };
 
   // —— 单个子任务处理：execute+review，失败自动改派一次（P0-2）——
@@ -979,6 +1031,7 @@ export async function runSquadOrchestration(
           // 改派也失败：维持 error 终态。
           st.error = e2 instanceof Error ? e2.message : String(e2);
           st.output = null;
+          speak(next, 'execute', 'end', `「${st.title.slice(0, 24)}」改派后仍失败`);
           emit(
             makeTrace({
               taskId,
@@ -996,6 +1049,7 @@ export async function runSquadOrchestration(
       // 无可改派对象：单成员失败不阻塞全局，记 error，产出置空，trace 落 failed。
       st.error = errMsg;
       st.output = null;
+      speak(st.assigneeId, 'execute', 'end', `「${st.title.slice(0, 24)}」执行失败`);
       emit(
         makeTrace({
           taskId,
@@ -1036,6 +1090,7 @@ export async function runSquadOrchestration(
         assigned.map(async (st, idx) => {
           if (!hasBudget()) return; // 预算护栏：提问途中耗尽即停
           try {
+            speak(st.assigneeId, 'kickoff', 'start', `开工确认「${st.title.slice(0, 24)}」…`);
             const reply = await call(st.assigneeId, [
               {
                 role: 'system',
@@ -1054,6 +1109,9 @@ export async function runSquadOrchestration(
             ], { maxTokens: 400 });
             if (!firstLineIsOk(reply)) {
               questions.push({ idx, assigneeId: st.assigneeId, question: reply.trim().slice(0, 300) });
+              speak(st.assigneeId, 'kickoff', 'end', '已提交开工问题，等待 leader 解答');
+            } else {
+              speak(st.assigneeId, 'kickoff', 'end', '无疑问，准备开工');
             }
           } catch {
             /* 单条提问失败视为无问题 */
@@ -1116,6 +1174,7 @@ export async function runSquadOrchestration(
         reviewable.map(async (st) => {
           if (!hasBudget()) return; // 预算护栏：评审途中耗尽即停
           try {
+            speak(st.assigneeId, 'cross-review', 'start', '交叉评审其他成员产出…');
             const others = reviewable
               .filter((o) => o !== st)
               .map((o) => `### ${o.title}（执行者 ${o.assigneeId}）\n${(o.output ?? '').slice(0, 800)}`)
@@ -1130,8 +1189,7 @@ export async function runSquadOrchestration(
                     '若你的产出需要与他人衔接或据此修订，直接输出修订后的完整版本；' +
                     '若无需调整，第一行只输出 OK。',
                 ),
-              },
-              {
+              },              {
                 role: 'user',
                 content:
                   `你的子任务：「${st.title}」\n你的产出：\n${(st.output ?? '').slice(0, 800)}` +
@@ -1145,6 +1203,7 @@ export async function runSquadOrchestration(
               revised.length > (st.output?.length ?? 0) * 0.5 || revised.length > 200;
             if (!firstLineIsOk(reply) && longEnough) {
               st.output = revised;
+              speak(st.assigneeId, 'cross-review', 'end', `「${st.title.slice(0, 24)}」已按交叉评审修订产出`);
               emit(
                 makeTrace({
                   taskId,
@@ -1173,6 +1232,7 @@ export async function runSquadOrchestration(
     if (!hasBudget()) {
       noteBudgetGuard('跳过重规划');
     } else {
+    speak(team.leaderId, 'replan', 'start', '正在检查任务覆盖，必要时追加子任务…');
     const replanRaw = await call(team.leaderId, [
       {
         role: 'system',
@@ -1190,6 +1250,7 @@ export async function runSquadOrchestration(
     const extra = parseSubTasks(replanRaw);
     if (extra) {
       const toAdd = extra.slice(0, 3);
+      speak(team.leaderId, 'replan', 'end', `覆盖有缺口，追加 ${toAdd.length} 个子任务`);
       emit(
         makeTrace({
           taskId,
@@ -1208,6 +1269,8 @@ export async function runSquadOrchestration(
         emitAssignTrace(st);
       }
       await Promise.all(appended.map((st, i) => runSubTask(st, toAdd[i])));
+    } else {
+      speak(team.leaderId, 'replan', 'end', '覆盖完整，无需追加');
     }
     }
   } catch {
@@ -1227,6 +1290,7 @@ export async function runSquadOrchestration(
       `交付物可以写得完整充分，上限 ${summarizeLimit} 字；不要为压缩篇幅砍掉实质内容（数据、表格、案例都要保留）。`,
   );
   const summarizeUser = `原任务：\n${taskText}\n\n${buildDigest(assigned)}`;
+  speak(team.leaderId, 'summarize', 'start', '正在汇总各成员产出，形成最终交付…');
   let deliverableRaw: string;
   if (input.chatRich) {
     // 续写拼接：汇总被 maxTokens 腰斩（finishReason === 'length'）时，把已产出前段
@@ -1284,6 +1348,7 @@ export async function runSquadOrchestration(
       summary: `Leader 汇总交付：${deliverable.slice(0, 60)}`,
     }),
   );
+  speak(team.leaderId, 'summarize', 'end', `交付已汇总（${deliverable.length} 字）`);
 
   return { subtasks: assigned, deliverable, traces, llmCalls };
 }

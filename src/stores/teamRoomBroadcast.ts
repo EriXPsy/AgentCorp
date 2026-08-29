@@ -21,7 +21,10 @@ export function isMilestoneTrace(trace: A2aTraceRecord): boolean {
     s.includes('汇总交付') ||
     s.includes('重规划') ||
     s.includes('开工确认') ||
-    s.includes('交叉评审')
+    s.includes('交叉评审') ||
+    // P2 放宽：成员回交产出也进房间（每子任务每轮一条，有界不刷屏；
+    // 高频中间态由 roomLive 直播槽位承担，只更新不追加）
+    s.includes('成员回交产出')
   );
 }
 

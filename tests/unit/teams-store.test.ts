@@ -135,3 +135,12 @@ describe('appendTeamChatEvent（原子 append 端点）', () => {
     expect(stored.chatEvents![199].content).toBe('新消息');
   });
 });
+
+describe('fetchTeams 快照兜底（浏览器预览 shim）', () => {
+  it('shim 返回 200 空对象（teams 字段缺失）→ 兜底为空数组，不白屏', async () => {
+    teams = undefined as unknown as TeamSummary[]; // 模拟 shim：{ teams: undefined }
+    await useTeamsStore.getState().fetchTeams();
+    expect(useTeamsStore.getState().teams).toEqual([]);
+    expect(useTeamsStore.getState().error).toBeNull();
+  });
+});

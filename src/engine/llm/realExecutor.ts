@@ -10,6 +10,7 @@
  * S9 重试与 failed 流转处理，绝不静默成功。
  */
 import type { LlmCallContext } from '@/types/llm-usage';
+import { revealText } from './streaming-reveal';
 
 export interface RealExecutionResult {
   /** 模型真实产出文本 */
@@ -113,13 +114,30 @@ export const REAL_CHAT_DEFAULT_TIMEOUT_MS = 120_000;
  * 或第四参（`runRealChat(msgs, 2048, timeoutMs, { ... })`）。
  * @throws Error 当未配置 / 上游失败 / 空产出 / 超时时。
  */
+/**
+ * 流式增量回调选项。后端 /api/llm/chat 代理不支持 SSE（stream:false 写死），
+ * 因此由前端兜底：拿到全文后按标点/段落切片逐段 reveal（见 ./streaming-reveal），
+ * 对调用方的接口与未来真流式路径保持一致（onDelta 收到的是累积文本，末次即全文）。
+ */
+export interface RealChatStreamOptions {
+  onDelta?: (accumulated: string) => void;
+  /** 兜底揭示间隔（ms），默认 30。 */
+  revealIntervalMs?: number;
+}
+
 export async function runRealChat(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   maxTokens = 2048,
   timeoutOrCtx: number | LlmCallContext = REAL_CHAT_DEFAULT_TIMEOUT_MS,
   maybeCtx?: LlmCallContext,
+  stream?: RealChatStreamOptions,
 ): Promise<string> {
-  return (await runRealChatRich(messages, maxTokens, timeoutOrCtx, maybeCtx)).content;
+  const { content } = await runRealChatRich(messages, maxTokens, timeoutOrCtx, maybeCtx);
+  // 兜底伪流式：全文到手后分段揭示，揭示完成再返回（保证 final 落盘在 reveal 之后）。
+  if (stream?.onDelta) {
+    await revealText(content, stream.onDelta, stream.revealIntervalMs ?? 30).done;
+  }
+  return content;
 }
 
 /**

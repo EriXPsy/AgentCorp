@@ -9,14 +9,20 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AtSign, CheckCircle2, ClipboardList, Loader2, MessageCircle, RotateCcw, SendHorizonal, TriangleAlert, Users } from 'lucide-react';
+import { AtSign, CheckCircle2, ClipboardList, Loader2, RotateCcw, SendHorizonal, TriangleAlert, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAgentsStore } from '@/stores/agents';
 import { useApprovalsStore } from '@/stores/approvals';
 import { useChatStore } from '@/stores/chat';
+import { useRightPanelStore } from '@/stores/rightPanelStore';
 import { useTeamsStore } from '@/stores/teams';
 import MarkdownContent from '@/pages/Chat/MarkdownContent';
+import { AgentAvatar } from '@/components/chat/AgentAvatar';
+import { StreamingReplyBubble } from '@/components/chat/StreamingReplyBubble';
+import { TaskDraftCard } from '@/components/chat/TaskDraftCard';
+import { TeamLiveBubbles } from '@/components/chat/TeamLiveBubbles';
+import { buildBusyStatusLine, deriveBusyAgentIds, formatBubbleTime, memberRoleLabel } from '@/lib/team-roster';
 import {
   buildTaskDraftEvent,
   buildTaskDraftResolution,
@@ -40,30 +46,26 @@ import {
   snapshotRoomHistory,
   taskTitleFromInstruction,
   type TaskDraftAction,
-  type TaskDraftCard,
+  type TaskDraftCard as TaskDraftCardData,
   type TeamChatBubble,
 } from '@/lib/team-task-chat';
 import { retryFailedTask, runTeamChatWorkOrder } from '@/stores/teamChatWorkOrder';
 import { runRealChat } from '@/engine/llm/realExecutor';
-import { cn, isAvatarImage } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import type { KanbanTask } from '@/types/task';
-
-/** 头像可能是 emoji 也可能是 base64/URL 图片，按形态渲染。 */
-function AgentAvatar({ avatar, className }: { avatar?: string | null; className?: string }) {
-  if (isAvatarImage(avatar)) {
-    return <img src={avatar!} alt="" className={cn('rounded-full object-cover', className)} />;
-  }
-  return <span className={className}>{avatar ?? '🤖'}</span>;
-}
 
 export function TeamChatView({ teamId }: { teamId: string }) {
   const navigate = useNavigate();
   const teams = useTeamsStore((s) => s.teams);
   const fetchTeams = useTeamsStore((s) => s.fetchTeams);
+  // 编排实况（内存态）：teamId 下各成员的直播槽位，多成员并行互不覆盖
+  const roomLive = useTeamsStore((s) => s.roomLive[teamId]);
   const agents = useAgentsStore((s) => s.agents);
   const tasks = useApprovalsStore((s) => s.tasks);
+  const fetchTasks = useApprovalsStore((s) => s.fetchTasks);
   const createTask = useApprovalsStore((s) => s.createTask);
   const updateTask = useApprovalsStore((s) => s.updateTask);
+  const fetchAgentStatuses = useAgentsStore((s) => s.fetchAgentStatuses);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -72,6 +74,8 @@ export function TeamChatView({ teamId }: { teamId: string }) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
+  // 流式回复：leader/成员回复期间的分段揭示内容（final 落房间后清空，被正式气泡取代）
+  const [streamReply, setStreamReply] = useState<{ agentId: string; text: string } | null>(null);
   // 房间内一键验收/打回：reviewBusy 防连点；rejectTaskId 记录正在填打回意见的任务
   const [reviewBusy, setReviewBusy] = useState(false);
   const [rejectTaskId, setRejectTaskId] = useState<string | null>(null);
@@ -79,7 +83,9 @@ export function TeamChatView({ teamId }: { teamId: string }) {
 
   useEffect(() => {
     void fetchTeams();
-  }, [fetchTeams]);
+    // 忙闲状态依赖任务数据：房间打开时刷新任务快照并派生 agentStatuses
+    void fetchTasks().then(() => void fetchAgentStatuses());
+  }, [fetchTeams, fetchTasks, fetchAgentStatuses]);
 
   const team = teams.find((t) => t.id === teamId) ?? null;
   const leaderId = team?.leaderId ?? null;
@@ -94,6 +100,12 @@ export function TeamChatView({ teamId }: { teamId: string }) {
       .filter((a): a is NonNullable<typeof a> => Boolean(a));
   }, [team, agents]);
 
+  // 头部实时状态行：有成员在忙（任一 in-progress 任务的 assignee）时显示「X 正在工作…」
+  const busyLine = useMemo(() => {
+    const busyIds = deriveBusyAgentIds(tasks);
+    return buildBusyStatusLine(members.filter((m) => busyIds.has(m.id)).map((m) => m.name));
+  }, [tasks, members]);
+
   const roomEvents = useMemo(() => team?.chatEvents ?? [], [team?.chatEvents]);
   const bubbles = useMemo(
     // 协议事件（立项草稿卡/处置记录）不进对话流，由 renderItems 单独渲染
@@ -101,15 +113,15 @@ export function TeamChatView({ teamId }: { teamId: string }) {
     [roomEvents],
   );
   const draftResolutions = useMemo(() => collectTaskDraftResolutions(roomEvents), [roomEvents]);
-  // 渲染序列：按房间事件原始顺序穿插对话气泡与立项草稿卡
+  // 渲染序列：按房间事件原始顺序穿插对话气泡与立项草稿卡（草稿卡带事件 createdAt 供倒计时）
   const renderItems = useMemo(() => {
-    const items: Array<{ key: string; bubble?: TeamChatBubble; draft?: TaskDraftCard; draftAction?: TaskDraftAction }> = [];
+    const items: Array<{ key: string; bubble?: TeamChatBubble; draft?: TaskDraftCardData; draftAction?: TaskDraftAction; draftCreatedAt?: string }> = [];
     let bubbleIdx = 0;
     roomEvents.forEach((e, i) => {
       if (isTaskProtocolContent(e.content)) {
         const card = parseTaskDraftEvent(e.content);
         if (card && e.from !== 'user') {
-          items.push({ key: `draft-${i}`, draft: card, draftAction: draftResolutions.get(card.id) });
+          items.push({ key: `draft-${i}`, draft: card, draftAction: draftResolutions.get(card.id), draftCreatedAt: e.createdAt });
         }
         return;
       }
@@ -244,7 +256,7 @@ export function TeamChatView({ teamId }: { teamId: string }) {
 
   /** 立项确认卡处置：确认 → 先立项成功再落 confirmed 并开工（顺序反了会卡片显示已确认但任务没建）；取消 → 搁置 */
   const handleDraftResolution = useCallback(
-    async (card: TaskDraftCard, action: 'confirmed' | 'cancelled') => {
+    async (card: TaskDraftCardData, action: 'confirmed' | 'cancelled') => {
       if (reviewBusy || !team || !leaderId) return;
       setReviewBusy(true);
       try {
@@ -324,7 +336,9 @@ export function TeamChatView({ teamId }: { teamId: string }) {
           return;
         }
       }
-      // 2) 组上下文调真实模型（快照即历史，不再裁「最后一条」）
+      // 2) 组上下文调真实模型（快照即历史，不再裁「最后一条」）。
+      //    流式观感：/api/llm/chat 代理不支持 SSE，runRealChat 拿到全文后前端
+      //    分段 reveal（onDelta 累积文本），期间房间显示流式气泡。
       const messages = buildTeamChatMessages(
         {
           id: target.id,
@@ -337,9 +351,14 @@ export function TeamChatView({ teamId }: { teamId: string }) {
         history,
         userText,
       );
-      const reply = await runRealChat(messages);
+      setStreamReply({ agentId: targetId, text: '' });
+      const reply = await runRealChat(messages, 2048, undefined, undefined, {
+        onDelta: (acc) => setStreamReply({ agentId: targetId, text: acc }),
+      });
       const { text: replyText, execute } = parseExecuteMarker(reply);
       await appendRoomEvent(teamId, { from: targetId, to: 'user', content: replyText });
+      // final 已落房间：流式气泡被正式气泡取代
+      setStreamReply(null);
 
       // 3) 对 leader 派活 → intake（一次调用完成意图分类 + 需求归纳）。
       //    判定为派活时不直接立项：先出确认卡，老板点头才开工（P0-1），
@@ -380,6 +399,7 @@ export function TeamChatView({ teamId }: { teamId: string }) {
       toast.error(`发送失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSending(false);
+      setStreamReply(null);
     }
   }, [agents, appendRoomEvent, createTask, draft, leaderId, members, sending, team, teamId]);
 
@@ -397,57 +417,56 @@ export function TeamChatView({ teamId }: { teamId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* 团队头：名称 + 成员 + 任务入口 */}
+      {/* 团队头（Knowe 风格）：左侧 团队名 + 实时状态行；右侧 任务入口 + 成员头像叠放（点击开花名册） */}
       <div className="shrink-0 border-b border-black/[0.06] px-8 py-3">
-        <div className="mx-auto flex max-w-[1000px] flex-wrap items-center gap-2">
-          <Users className="h-4 w-4 shrink-0" style={{ color: '#6366f1' }} />
-          <span className="min-w-0 flex-1 truncate text-[14px] font-bold text-foreground">{team.name}</span>
-          <span className="text-[11px] text-muted-foreground">{members.length} 名成员</span>
+        <div className="mx-auto flex max-w-[1000px] items-center gap-3">
+          <Users className="h-4 w-4 shrink-0" style={{ color: 'var(--neu-ink)' }} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className="min-w-0 truncate text-[14px] font-bold text-foreground">{team.name}</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{members.length} 名成员</span>
+            </div>
+            {busyLine && (
+              <p className="mt-0.5 flex items-center gap-1.5 text-[11px]" style={{ color: '#b45309' }}>
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: '#f59e0b' }} />
+                {busyLine}
+              </p>
+            )}
+          </div>
           {teamTasks.length > 0 && (
             <button
               type="button"
               onClick={() => navigate('/kanban')}
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition-colors hover:bg-black/5"
-              style={{ color: '#6366f1' }}
+              className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition-colors hover:bg-black/5"
+              style={{ color: 'var(--neu-ink)' }}
             >
               <ClipboardList className="h-3.5 w-3.5" />
               {teamTasks.length} 个任务
             </button>
           )}
-        </div>
-        {/* 成员行：点头像旁按钮私聊 */}
-        <div className="mx-auto mt-2 flex max-w-[1000px] flex-wrap items-center gap-1.5">
-          {members.map((a) => (
-            <span
-              key={a.id}
-              className="flex items-center gap-1.5 rounded-full bg-black/[0.03] px-2 py-1 text-[11px] font-semibold"
-            >
-              <AgentAvatar avatar={a.avatar} className="flex h-4 w-4 items-center justify-center rounded-full text-[11px]" />
-              <span className="max-w-[90px] truncate">{a.name}</span>
-              {a.id === leaderId && (
-                <span className="rounded px-1 py-px text-[9px] font-bold" style={{ background: '#FFD23333', color: '#b8860b' }}>leader</span>
+          {/* 成员头像叠放：点击打开成员花名册右栏（私聊入口移到花名册里） */}
+          <button
+            type="button"
+            aria-label="打开成员花名册"
+            title="查看成员"
+            onClick={() => useRightPanelStore.getState().openPanel('roster', team.id)}
+            className="flex shrink-0 items-center rounded-full p-0.5 transition-transform hover:scale-105"
+          >
+            <span className="flex -space-x-2">
+              {members.slice(0, 5).map((a) => (
+                <AgentAvatar
+                  key={a.id}
+                  avatar={a.avatar}
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.05] text-[13px] ring-2 ring-white"
+                />
+              ))}
+              {members.length > 5 && (
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.06] text-[10px] font-bold text-muted-foreground ring-2 ring-white">
+                  +{members.length - 5}
+                </span>
               )}
-              <button
-                type="button"
-                title={`私聊 ${a.name}`}
-                onClick={() => {
-                  try {
-                    useChatStore.getState().openDirectAgentSession(a.id, {
-                      teamId: team.id,
-                      teamName: team.name,
-                      isLeaderChat: a.id === leaderId,
-                    });
-                  } catch {
-                    /* agent 不存在时忽略 */
-                  }
-                }}
-                className="flex items-center justify-center rounded-full p-0.5 transition-colors hover:bg-white"
-                style={{ color: '#6366f1' }}
-              >
-                <MessageCircle className="h-3 w-3" />
-              </button>
             </span>
-          ))}
+          </button>
         </div>
       </div>
 
@@ -487,7 +506,7 @@ export function TeamChatView({ teamId }: { teamId: string }) {
           {renderItems.map((item) => {
             if (item.draft) {
               const card = item.draft;
-              const action = item.draftAction;
+              const action = item.draftAction ?? null;
               const speaker = agentOf(team.leaderId);
               return (
                 <div key={item.key} className="flex items-start gap-2.5">
@@ -498,44 +517,22 @@ export function TeamChatView({ teamId }: { teamId: string }) {
                   <div className="min-w-0 max-w-[78%]">
                     <div className="mb-1 flex items-center gap-1.5 text-[11px]">
                       <span className="font-semibold text-foreground">{speaker?.name ?? 'leader'}</span>
+                      {speaker && (
+                        <span className="text-muted-foreground">· {memberRoleLabel(speaker)}</span>
+                      )}
                       <span className="rounded px-1 py-px text-[9px] font-bold" style={{ background: '#FFD23333', color: '#b8860b' }}>leader</span>
                     </div>
-                    <div className="rounded-2xl rounded-tl-md border px-3.5 py-3" style={{ borderColor: '#6366f144', background: '#6366f10a' }}>
-                      <div className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: '#6366f1' }}>
-                        <ClipboardList className="h-3.5 w-3.5" />
-                        任务草稿{!action ? ' · 待确认' : ''}
-                      </div>
-                      <p className="mt-1.5 text-[13px] font-bold text-foreground">{card.title}</p>
-                      <p className="mt-1 whitespace-pre-wrap text-[12.5px] leading-relaxed text-foreground/80">{card.requirement}</p>
-                      {!action ? (
-                        <div className="mt-2.5 flex items-center gap-2">
-                          <button
-                            type="button"
-                            disabled={reviewBusy}
-                            onClick={() => void handleDraftResolution(card, 'confirmed')}
-                            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition-colors hover:bg-black/5 disabled:opacity-50"
-                            style={{ color: '#22c55e' }}
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            确认开工
-                          </button>
-                          <button
-                            type="button"
-                            disabled={reviewBusy}
-                            onClick={() => void handleDraftResolution(card, 'cancelled')}
-                            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition-colors hover:bg-black/5 disabled:opacity-50"
-                            style={{ color: '#ef4444' }}
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                            取消
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-[11px] font-semibold text-muted-foreground">
-                          {action === 'confirmed' ? '✅ 已确认立项' : action === 'cancelled' ? '已取消' : '已被新草稿取代'}
-                        </p>
-                      )}
-                    </div>
+                    {/* Knowe 风格派发确认卡：倒计时/终态纯前端按事件 createdAt 计算，协议不变 */}
+                    <TaskDraftCard
+                      card={card}
+                      createdAt={item.draftCreatedAt}
+                      assignee={speaker ? { name: speaker.name, avatar: speaker.avatar, role: memberRoleLabel(speaker) } : null}
+                      action={action}
+                      busy={reviewBusy}
+                      onConfirm={() => void handleDraftResolution(card, 'confirmed')}
+                      onReject={() => void handleDraftResolution(card, 'cancelled')}
+                      onRevise={() => inputRef.current?.focus()}
+                    />
                   </div>
                 </div>
               );
@@ -543,17 +540,22 @@ export function TeamChatView({ teamId }: { teamId: string }) {
             const b = item.bubble!;
             if (b.kind === 'user') {
               const toName = mentionTargetName(b);
+              const time = formatBubbleTime(b.createdAt);
               return (
-                <div key={b.id} className="flex items-start justify-end gap-2.5">
+                <div key={b.id} className="group flex items-start justify-end gap-2.5">
                   <div className="min-w-0 max-w-[78%]">
                     <div className="mb-1 flex items-center justify-end gap-1.5 text-[11px]">
                       <span className="text-muted-foreground">你{toName ? ` → ${toName}` : ''}</span>
+                      {time && (
+                        <span className="text-muted-foreground/70 opacity-0 transition-opacity group-hover:opacity-100">{time}</span>
+                      )}
                     </div>
-                    <div className="rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13px] leading-relaxed text-white" style={{ background: '#6366f1' }}>
+                    {/* 品牌暖黄气泡（token --ac），深色文字保证对比度 */}
+                    <div className="rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13px] leading-relaxed" style={{ background: 'var(--ac, #f5b400)', color: '#1A1C1E' }}>
                       {b.text}
                     </div>
                   </div>
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[16px]" style={{ background: '#6366f122' }}>
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[16px]" style={{ background: 'rgb(var(--ac-rgb, 245 180 0) / 0.15)' }}>
                     👤
                   </span>
                 </div>
@@ -561,10 +563,11 @@ export function TeamChatView({ teamId }: { teamId: string }) {
             }
             const speaker = agentOf(b.actorId);
             const isLeader = b.actorId === leaderId;
+            const time = formatBubbleTime(b.createdAt);
             // 交付消息关联到唯一 review 任务才挂验收/打回按钮（多义或已处理不显示）
             const reviewTask = reviewActionByBubble.get(b.id) ?? null;
             return (
-              <div key={b.id} className="flex items-start gap-2.5">
+              <div key={b.id} className="group flex items-start gap-2.5">
                 <AgentAvatar
                   avatar={speaker?.avatar}
                   className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.04] text-[16px]"
@@ -572,8 +575,14 @@ export function TeamChatView({ teamId }: { teamId: string }) {
                 <div className="min-w-0 max-w-[78%]">
                   <div className="mb-1 flex items-center gap-1.5 text-[11px]">
                     <span className="font-semibold text-foreground">{speaker?.name ?? b.actorId}</span>
+                    {speaker && (
+                      <span className="text-muted-foreground">· {memberRoleLabel(speaker)}</span>
+                    )}
                     {isLeader && (
                       <span className="rounded px-1 py-px text-[9px] font-bold" style={{ background: '#FFD23333', color: '#b8860b' }}>leader</span>
+                    )}
+                    {time && (
+                      <span className="text-muted-foreground/70 opacity-0 transition-opacity group-hover:opacity-100">{time}</span>
                     )}
                   </div>
                   <div className="rounded-2xl rounded-tl-md border border-black/[0.05] bg-black/[0.03] px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
@@ -639,7 +648,18 @@ export function TeamChatView({ teamId }: { teamId: string }) {
               </div>
             );
           })}
-          {sending && (
+          {/* 编排实况：多成员并行各占一个直播槽位；正式消息落房间后槽位清除 */}
+          {roomLive && <TeamLiveBubbles live={roomLive} members={members} />}
+          {/* leader/成员回复的流式气泡：reveal 期间显示，final 落房间后移除 */}
+          {streamReply && (
+            <StreamingReplyBubble
+              name={agentOf(streamReply.agentId)?.name ?? streamReply.agentId}
+              role={agentOf(streamReply.agentId) ? memberRoleLabel(agentOf(streamReply.agentId)!) : undefined}
+              avatar={agentOf(streamReply.agentId)?.avatar}
+              text={streamReply.text}
+            />
+          )}
+          {sending && !streamReply && (
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               成员正在回复…
@@ -703,8 +723,8 @@ export function TeamChatView({ teamId }: { teamId: string }) {
               type="button"
               onClick={() => void handleSend()}
               disabled={sending || !draft.trim()}
-              className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white transition-opacity disabled:opacity-40"
-              style={{ background: '#6366f1' }}
+              className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-opacity disabled:opacity-40"
+              style={{ background: 'var(--ac, #f5b400)', color: '#1A1C1E' }}
               aria-label="发送"
             >
               {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SendHorizonal className="h-3.5 w-3.5" />}
