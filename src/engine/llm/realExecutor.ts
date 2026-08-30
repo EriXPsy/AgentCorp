@@ -2,8 +2,11 @@
  * src/engine/llm/realExecutor.ts
  * 真实 LLM 执行适配器（前端侧）。
  *
- * 前端只调同源 /api/llm/chat（由 Vite dev 中间件 vite-plugin-llm-proxy 代理到
- * 真实 LLM，如火山方舟 Ark）。API key 只在服务端读取，前端绝不接触。
+ * 前端只调同源 /api/llm/chat，承接方二选一：
+ * - Web 预览 / vite dev：vite-plugin-llm-proxy（stream:false 写死，前端分段 reveal 兜底）；
+ * - 打包版 Electron：electron/api/routes/llm-chat.ts（支持 SSE 真流式透传，
+ *   上游可为华为昇腾 MindIE / vLLM-Ascend 等任意 OpenAI 兼容端点）。
+ * API key 只在服务端读取，前端绝不接触。
  *
  * 这是「真实执行」而非 mock：把任务内容作为 prompt 交给真实模型，返回模型的
  * 真实产出；失败（未配置 / 上游报错 / 空产出）都如实抛出，交给 autoWorker 的
@@ -115,9 +118,10 @@ export const REAL_CHAT_DEFAULT_TIMEOUT_MS = 120_000;
  * @throws Error 当未配置 / 上游失败 / 空产出 / 超时时。
  */
 /**
- * 流式增量回调选项。后端 /api/llm/chat 代理不支持 SSE（stream:false 写死），
- * 因此由前端兜底：拿到全文后按标点/段落切片逐段 reveal（见 ./streaming-reveal），
- * 对调用方的接口与未来真流式路径保持一致（onDelta 收到的是累积文本，末次即全文）。
+ * 流式增量回调选项。请求带 stream:true：后端支持 SSE（electron host-api 路由 +
+ * 昇腾 MindIE / vLLM-Ascend 等 OpenAI 兼容上游）时逐 chunk 真流式回调；
+ * 不支持（如 web 预览的 vite proxy 写死 stream:false）时回退为全文分段
+ * reveal（见 ./streaming-reveal）。两条路径对调用方接口一致（onDelta 收累积文本，末次即全文）。
  */
 export interface RealChatStreamOptions {
   onDelta?: (accumulated: string) => void;
@@ -132,11 +136,133 @@ export async function runRealChat(
   maybeCtx?: LlmCallContext,
   stream?: RealChatStreamOptions,
 ): Promise<string> {
-  const { content } = await runRealChatRich(messages, maxTokens, timeoutOrCtx, maybeCtx);
-  // 兜底伪流式：全文到手后分段揭示，揭示完成再返回（保证 final 落盘在 reveal 之后）。
-  if (stream?.onDelta) {
-    await revealText(content, stream.onDelta, stream.revealIntervalMs ?? 30).done;
+  if (!stream?.onDelta) {
+  // 无流式订阅：维持原非流式路径
+    return (await runRealChatRich(messages, maxTokens, timeoutOrCtx, maybeCtx)).content;
   }
+  return runRealChatWithDelta(messages, maxTokens, timeoutOrCtx, maybeCtx, stream);
+}
+
+interface ChatJsonPayload {
+  content?: string;
+  finishReason?: string | null;
+  usage?: unknown;
+  model?: string;
+  error?: string;
+  detail?: unknown;
+}
+
+/** 非流式 JSON 响应的统一解析：错误映射 + 空产出拒绝 + 用量上报。 */
+async function parseChatJsonResponse(
+  res: Response,
+  ctx?: LlmCallContext,
+): Promise<{ content: string; finishReason: string | null }> {
+  const data = (await res.json().catch(() => ({}))) as ChatJsonPayload;
+  if (!res.ok) {
+    const detail =
+      typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail ?? data.error ?? {});
+    throw new Error(`真实执行失败（${res.status} ${data.error ?? ''}）：${detail}`.trim());
+  }
+  const content = (data.content ?? '').trim();
+  if (!content) throw new Error('真实执行返回空产出（模型无有效 content）');
+  reportUsage(data.usage ?? null, data.model ?? null, ctx);
+  return { content, finishReason: data.finishReason ?? null };
+}
+
+/** SSE 流的增量解析：data: 行逐条 JSON，累积 delta.content 喂 onDelta。 */
+async function consumeSseStream(
+  res: Response,
+  onDelta: (accumulated: string) => void,
+  ctx?: LlmCallContext,
+): Promise<string> {
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let acc = '';
+  let usage: unknown = null;
+  let model: string | null = null;
+
+  // 处理一个 SSE 事件块（可含多条 data: 行，拼接后为一个 JSON payload）
+  const handleEvent = (raw: string) => {
+    const dataLines = raw
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('data:'))
+      .map((l) => l.slice(5).trim());
+    if (dataLines.length === 0) return;
+    const payload = dataLines.join('');
+    if (payload === '[DONE]') return;
+    // 容错：单条坏事件不中断整流
+    try {
+      const json = JSON.parse(payload) as {
+        choices?: Array<{ delta?: { content?: string | null } }>;
+        usage?: unknown;
+        model?: string;
+      };
+      const delta = json.choices?.[0]?.delta?.content ?? '';
+      if (delta) {
+        acc += delta;
+        onDelta(acc);
+      }
+      usage = json.usage ?? usage;
+      model = json.model ?? model;
+    } catch {
+      /* 忽略坏事件 */
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    // SSE 事件以空行分隔
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      handleEvent(buf.slice(0, idx));
+      buf = buf.slice(idx + 2);
+    }
+  }
+  if (buf.trim()) handleEvent(buf);
+
+  const content = acc.trim();
+  if (!content) throw new Error('真实执行返回空产出（模型无有效 content）');
+  reportUsage(usage, model, ctx);
+  reportUsage(usage, model, ctx);
+  return acc;
+}
+
+/** 带流式回调的 chat：优先真 SSE，回退全文分段 reveal。 */
+async function runRealChatWithDelta(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  maxTokens: number,
+  timeoutOrCtx: number | LlmCallContext,
+  maybeCtx: LlmCallContext | undefined,
+  stream: RealChatStreamOptions,
+): Promise<string> {
+  const timeoutMs = typeof timeoutOrCtx === 'number' ? timeoutOrCtx : REAL_CHAT_DEFAULT_TIMEOUT_MS;
+  const ctx = typeof timeoutOrCtx === 'object' ? timeoutOrCtx : maybeCtx;
+  let res: Response;
+  try {
+    res = await fetch('/api/llm/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ messages, maxTokens, stream: true }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(`模型响应超时（${Math.round(timeoutMs / 1000)}s），请重试`, { cause: err });
+    }
+    throw err;
+  }
+
+  const contentType = res.headers.get('content-type') ?? '';
+  if (res.ok && contentType.includes('text/event-stream') && res.body) {
+    return consumeSseStream(res, stream.onDelta!, ctx);
+  }
+  // 回退：非流式 JSON（web 预览 proxy / 上游不支持流式），全文到手后分段揭示
+  const { content } = await parseChatJsonResponse(res, ctx);
+  await revealText(content, stream.onDelta!, stream.revealIntervalMs ?? 30).done;
   return content;
 }
 
@@ -168,21 +294,5 @@ export async function runRealChatRich(
     }
     throw err;
   }
-  const data = (await res.json().catch(() => ({}))) as {
-    content?: string;
-    finishReason?: string | null;
-    usage?: unknown;
-    model?: string;
-    error?: string;
-    detail?: unknown;
-  };
-  if (!res.ok) {
-    const detail =
-      typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail ?? data.error ?? {});
-    throw new Error(`真实执行失败（${res.status} ${data.error ?? ''}）：${detail}`.trim());
-  }
-  const content = (data.content ?? '').trim();
-  if (!content) throw new Error('真实执行返回空产出（模型无有效 content）');
-  reportUsage(data.usage ?? null, data.model ?? null, ctx);
-  return { content, finishReason: data.finishReason ?? null };
+  return parseChatJsonResponse(res, ctx);
 }

@@ -33,6 +33,7 @@ import { handleConvergenceRoutes } from './routes/convergence';
 import { handleCraftRoutes } from './routes/craft';
 import { handleTraceRoutes } from './routes/traces';
 import { handleCapsuleRoutes } from './routes/capsules';
+import { handleLlmChatRoutes } from './routes/llm-chat';
 import { isAuthorizedHostApiRequest, applyCorsOrigin, sendJson, sendNoContent, sendUnauthorized } from './route-utils';
 
 type RouteHandler = (
@@ -81,6 +82,7 @@ const routeHandlers: RouteHandler[] = [
   handleCraftRoutes,
   handleTraceRoutes,
   handleCapsuleRoutes,
+  handleLlmChatRoutes,
 ];
 
 /**

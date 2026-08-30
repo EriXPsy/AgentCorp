@@ -30,6 +30,7 @@
         "build:web": "vite build --config vite.web.config.ts",
         "privacy:check": "bash scripts/privacy-grep.sh",
         "verify": "node scripts/qa/release-verify.mjs",
+        "verify:ascend": "node scripts/qa/ascend-verify.mjs",
         "agentteams:export": "node scripts/agentteams/export-hiclaw.mjs",
         "demo:shot": "playwright test tests/e2e/closed-loop-demo.spec.ts",
         "office:predecode": "node scripts/office/predecode-assets.mjs",
