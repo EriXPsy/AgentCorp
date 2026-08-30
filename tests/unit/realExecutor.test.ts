@@ -115,3 +115,67 @@ describe('runRealChat 流式兜底（onDelta）', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('runRealChat SSE 真流式（stream:true → text/event-stream）', () => {
+  function sseFetch(events: string[]) {
+    return vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          for (const ev of events) controller.enqueue(encoder.encode(ev));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+  }
+
+  it('逐 chunk 累积回调：onDelta 单调递增、末次即全文、返回全文', async () => {
+    vi.stubGlobal('fetch', sseFetch([
+      'data: {"choices":[{"delta":{"content":"你好，"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"老板"}}],"model":"m1"}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+
+    const seen: string[] = [];
+    const result = await runRealChat([{ role: 'user', content: 'hi' }], 2048, 10_000, undefined, {
+      onDelta: (acc) => seen.push(acc),
+    });
+
+    expect(result).toBe('你好，老板');
+    expect(seen).toEqual(['你好，', '你好，老板']);
+  });
+
+  it('单条坏事件不中断整流（容错跳过，继续累积）', async () => {
+    vi.stubGlobal('fetch', sseFetch([
+      'data: {"choices":[{"delta":{"content":"A"}}]}\n\n',
+      'data: {这不是合法JSON}\n\n',
+      'data: {"choices":[{"delta":{"content":"B"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+
+    const seen: string[] = [];
+    const result = await runRealChat([{ role: 'user', content: 'hi' }], 2048, 10_000, undefined, {
+      onDelta: (acc) => seen.push(acc),
+    });
+    expect(result).toBe('AB');
+  });
+
+  it('SSE 全程无产出 → 抛空产出错误', async () => {
+    vi.stubGlobal('fetch', sseFetch(['data: [DONE]\n\n']));
+    await expect(
+      runRealChat([{ role: 'user', content: 'hi' }], 2048, 10_000, undefined, { onDelta: () => {} }),
+    ).rejects.toThrow('空产出');
+  });
+
+  it('请求体带 stream:true 且 Accept 为 text/event-stream', async () => {
+    const fetchMock = sseFetch(['data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n']);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runRealChat([{ role: 'user', content: 'hi' }], 2048, 10_000, undefined, { onDelta: () => {} });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body)).stream).toBe(true);
+    expect((init.headers as Record<string, string>).Accept).toBe('text/event-stream');
+  });
+});

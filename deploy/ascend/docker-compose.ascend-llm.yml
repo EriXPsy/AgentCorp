@@ -1,0 +1,109 @@
+# AgentCorp 昇腾编排样例：vLLM-Ascend 推理服务 + model-service 评委容器
+#
+# 用法（在仓库根目录执行）：
+#   docker compose -f deploy/ascend/docker-compose.ascend-llm.yml up --build
+#
+# 包含两个服务：
+#   ascend-llm      —— vLLM-Ascend OpenAI 兼容推理服务（DeepSeek/Qwen 等）
+#   agentcorp-model —— model-service 评委容器（JUDGE_BACKEND=http 指向上面的服务）
+#
+# 可按需裁剪：
+#   - 只起评委（推理服务已在别处/华为云 MaaS 就绪）：删掉 ascend-llm，
+#     把 agentcorp-model 的 JUDGE_BASE_URL 指向外部端点即可；
+#     也可以直接用更精简的 model-service/docker-compose.ascend.yml。
+#   - 只起推理：删掉 agentcorp-model。
+#
+# 版本与镜像 tag 均为编写时示例，最终以 vLLM-Ascend 官方发布页为准：
+#   https://docs.vllm.ai/projects/ascend/en/latest/
+# 部署指南与常见坑见 docs/ascend/deployment.md。
+
+services:
+  # ------------------------------------------------------------------
+  # vLLM-Ascend OpenAI 兼容推理服务
+  # ------------------------------------------------------------------
+  ascend-llm:
+    # vLLM-Ascend 官方预构建镜像（CANN + torch + torch_npu + vllm-ascend 已锁定）。
+    # tag 以官方发布为准：https://quay.io/repository/ascend/vllm-ascend
+    image: ${VLLM_ASCEND_IMAGE:-quay.io/ascend/vllm-ascend:latest}
+    container_name: agentcorp-ascend-llm
+    # 只映射到本机回环；局域网访问改为 "8000:8000" 并自行加前置鉴权
+    # （vLLM 默认无鉴权，AgentCorp UI 的 API key 填任意非空串即可）。
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # 可通过环境变量指定服务端鉴权 key（vLLM 支持 --api-key，此处用
+      # 环境变量方式供命令行引用；不需要鉴权时留空并从 command 移除对应参数）。
+      - ASCEND_SERVED_API_KEY=${ASCEND_API_KEY:-}
+    command: >
+      vllm serve ${ASCEND_MODEL:-deepseek-ai/DeepSeek-V3}
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len ${ASCEND_MAX_MODEL_LEN:-8192}
+      --tensor-parallel-size ${ASCEND_TP_SIZE:-1}
+    volumes:
+      # 模型权重缓存（部署时置入，或让 vLLM 首次启动时从 ModelScope/HF 拉取）
+      - ${ASCEND_MODEL_CACHE:-/models}:/root/.cache/modelscope
+    # NPU 设备透传：设备节点名以所用固件版本为准
+    devices:
+      - /dev/davinci0:/dev/davinci0
+      - /dev/davinci_manager:/dev/davinci_manager
+      # 多卡或部分驱动版本还需（按需取消注释）：
+      # - /dev/davinci1:/dev/davinci1
+      # - /dev/devmm_svm:/dev/devmm_svm
+      # - /dev/hisi_hdc:/dev/hisi_hdc
+    # vLLM-Ascend 官方部署文档普遍要求放开 IPC 共享内存（多卡/大模型必需）
+    ipc: host
+    shm_size: "16g"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      # 大模型权重加载/编译耗时较长，宽限期给足
+      start_period: 10m
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # model-service 评委容器（复用仓库已有的昇腾 Dockerfile）
+  # ------------------------------------------------------------------
+  agentcorp-model:
+    build:
+      # build context 必须是仓库根：Dockerfile.ascend 的 builder 阶段需要前端源码
+      context: ..
+      dockerfile: model-service/Dockerfile.ascend
+      args:
+        # FlagOS 运行时镜像就绪后在此切换基座
+        ASCEND_BASE_IMAGE: ${ASCEND_BASE_IMAGE:-quay.io/ascend/cann:9.1.0-beta.1}
+    image: agentcorp-minicpmo:ascend
+    container_name: agentcorp-ascend-judge
+    ports:
+      - "127.0.0.1:8001:8000"
+    environment:
+      - MOCK=${MOCK:-false}
+      - WEB_ROOT=/app/web
+      - MODEL_PATH=${MODEL_PATH:-/models/MiniCPM-o-4.5}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - SAMPLES_DIR=/app/samples
+      - UPLOAD_DIR=/app/uploads
+      # 评委走 OpenAI 兼容通道，指向本编排内的推理服务（容器网络内按服务名互访）
+      - JUDGE_BACKEND=http
+      - JUDGE_BASE_URL=http://ascend-llm:8000/v1
+      - JUDGE_API_KEY=${ASCEND_API_KEY:-}
+      - JUDGE_MODEL=${ASCEND_MODEL:-deepseek-ai/DeepSeek-V3}
+    volumes:
+      - ../samples:/app/samples
+      - ./uploads:/app/uploads
+      - /models:/models
+    # 评委容器自身也要跑多模态真实推理时同样需要 NPU 透传；
+    # 若评委只走 JUDGE_BACKEND=http（推理全在外部），可整段删掉。
+    devices:
+      - /dev/davinci0:/dev/davinci0
+      - /dev/davinci_manager:/dev/davinci_manager
+      # 多卡或部分驱动版本还需（按需取消注释）：
+      # - /dev/devmm_svm:/dev/devmm_svm
+      # - /dev/hisi_hdc:/dev/hisi_hdc
+    depends_on:
+      ascend-llm:
+        condition: service_healthy
+    restart: unless-stopped
