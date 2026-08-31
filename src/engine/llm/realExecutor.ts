@@ -227,7 +227,6 @@ async function consumeSseStream(
   const content = acc.trim();
   if (!content) throw new Error('真实执行返回空产出（模型无有效 content）');
   reportUsage(usage, model, ctx);
-  reportUsage(usage, model, ctx);
   return acc;
 }
 
