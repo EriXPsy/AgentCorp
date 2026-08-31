@@ -178,9 +178,15 @@ const DUPLICATE_VOTE_MESSAGE = '该测评已投过票';
 /** 读取点赞态：优先跨用户聚合，失败回落本机。 */
 export async function getLike(agentId: string): Promise<LikeRecord> {
   try {
-    return await hostApiFetch<LikeRecord>(
+    const rec = await hostApiFetch<LikeRecord>(
       `/api/likes/${encodeURIComponent(agentId)}`,
     );
+    // hostApiFetch 不校验 HTTP 状态码：静态托管（Vercel 等）下该路由不存在时，
+    // 404 的 HTML/错误体会被当成功结果返回。形状不符按失败处理，走回落。
+    if (!rec || typeof rec !== 'object' || typeof rec.count !== 'number') {
+      throw new Error('invalid like record response');
+    }
+    return rec;
   } catch {
     // Web 预览无 electron-store：返回默认零态，避免 getLikeLocal 抛错。
     if (isBrowserPreviewMode()) {
@@ -211,9 +217,16 @@ export async function toggleLike(agentId: string): Promise<LikeRecord> {
 /** 青睐榜：优先跨用户榜，失败回落本机榜。 */
 export async function getFavorites(jobType: JobType): Promise<FavoriteRanking> {
   try {
-    return await hostApiFetch<FavoriteRanking>(
+    const ranking = await hostApiFetch<FavoriteRanking>(
       `/api/favorites?jobType=${encodeURIComponent(jobType)}`,
     );
+    // hostApiFetch 不校验 HTTP 状态码：静态托管（Vercel 等）下 /api/favorites
+    // 不存在时，404 的 HTML/错误 JSON 会被当成功结果返回（truthy 但无 ranking
+    // 数组），下游 `.ranking.find/.forEach` 直接白屏。形状不符按失败处理。
+    if (!ranking || typeof ranking !== 'object' || !Array.isArray(ranking.ranking)) {
+      throw new Error('invalid favorites response');
+    }
+    return ranking;
   } catch {
     // Web 预览无 Electron / electron-store：直接返回空排名，避免 getFavoritesLocal
     // 初始化 electron-store 抛错导致市集赛道卡「加载失败」。
