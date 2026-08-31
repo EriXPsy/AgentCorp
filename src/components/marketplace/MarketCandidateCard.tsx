@@ -12,8 +12,8 @@
  */
 import { Star, Building2, User, ShoppingCart, Gauge, Loader2, Award, Heart } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useEffect } from 'react';
-import { cn } from '@/lib/utils';
+import { useEffect, useState } from 'react';
+import { cn, isAvatarImage } from '@/lib/utils';
 import { RadarChartView } from '@/pages/Evaluation/RadarChart';
 import { MatchScoreBadge } from '@/components/marketplace/MatchScoreBadge';
 import { BossFavoriteBadge } from '@/components/marketplace/BossFavoriteBadge';
@@ -46,6 +46,39 @@ const SOURCE_TONE: Record<RadarSourceKind, string> = {
   heuristic: 'bg-amber-50 text-amber-600',
   none: 'bg-gray-100 text-gray-400',
 };
+
+/**
+ * 候选头像：avatar 可能是 emoji（Web 预览种子）也可能是图片 URL / data URL
+ * （Electron 模板或 dicebear CDN）。emoji 直接渲染；图片加载失败（CDN 不可达）
+ * 时回落为名字首字符色块，绝不显示裂图图标。
+ */
+function CandidateAvatar({ name, avatar }: { name: string; avatar: string }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const boxClass =
+    'h-16 w-16 overflow-hidden rounded-[20px] shadow-sm transition-transform duration-700 group-hover:scale-110';
+  if (isAvatarImage(avatar) && !imgFailed) {
+    return (
+      <div className={boxClass}>
+        <img
+          src={avatar}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setImgFailed(true)}
+        />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cn(
+        boxClass,
+        'flex items-center justify-center bg-[#FFD233]/20 text-2xl font-bold text-[#1A1C1E]',
+      )}
+    >
+      {avatar && !isAvatarImage(avatar) ? avatar : (name.trim().charAt(0) || '🤖')}
+    </div>
+  );
+}
 
 /** 绩效 verdict 配色 */
 const VERDICT_TONE: Record<Verdict, string> = {
@@ -93,9 +126,7 @@ export function MarketCandidateCard({
 
       {/* 头像 + 评分 / 类型 */}
       <div className="relative flex items-start justify-between">
-        <div className="h-16 w-16 overflow-hidden rounded-[20px] shadow-sm transition-transform duration-700 group-hover:scale-110">
-          <img src={candidate.avatar} alt={candidate.name} className="h-full w-full object-cover" />
-        </div>
+        <CandidateAvatar name={candidate.name} avatar={candidate.avatar} />
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1 rounded-full bg-[#FFD233]/20 px-3 py-1">
             <Star size={14} className="fill-[#FFD233] text-[#FFD233]" />
