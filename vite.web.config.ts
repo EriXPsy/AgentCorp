@@ -1,7 +1,8 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import renderer from 'vite-plugin-electron-renderer';
 import { resolve } from 'path';
+import { llmProxyPlugin } from './vite-plugin-llm-proxy';
 
 // Web-only dev config: serves the React renderer in a plain browser WITHOUT the
 // Electron *main process* plugin (which crashes in dev because the Electron
@@ -12,11 +13,20 @@ import { resolve } from 'path';
 // A browser-preview shim is injected into index.html at serve time so that
 // window.electron is defined and IPC calls become safe no-ops (mirrors
 // src/lib/browser-preview.ts createElectronShim), preventing white-screens.
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  // 把 .env 里的 LLM_* 注入 process.env，供 dev 中间件（Node 侧）读取。
+  // 与 vite.config.ts 保持一致：Web 预览同样只调同源 /api/llm/chat，
+  // 缺了 llmProxyPlugin 会导致真实执行 404（实测踩中）。
+  const env = loadEnv(mode, process.cwd(), '');
+  for (const key of ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'ASCEND_API_KEY', 'ASCEND_BASE_URL', 'ASCEND_MODEL']) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key];
+  }
+
   return {
     base: './',
     plugins: [
       react(),
+      llmProxyPlugin(),
       renderer(),
       {
         name: 'inject-browser-preview-shim',

@@ -22,3 +22,19 @@ describe("vite electron 配置的 LLM 代理", () => {
     expect(names).toContain("agentcorp-llm-proxy");
   });
 });
+
+describe("vite web 预览配置的 LLM 代理", () => {
+  it("vite.web.config.ts 同样注册 agentcorp-llm-proxy（双入口 web 预览真实执行不 404）", async () => {
+    const webConfigExport = (await import("../../vite.web.config")).default;
+    const fn = webConfigExport as (env: {
+      command: "serve" | "build";
+      mode: string;
+    }) => Promise<{ plugins?: unknown[] }> | { plugins?: unknown[] };
+    const resolved = await fn({ command: "serve", mode: "development" });
+    const plugins = (resolved.plugins ?? [])
+      .flat(Number.POSITIVE_INFINITY)
+      .filter(Boolean) as Array<{ name?: string }>;
+    const names = plugins.map((p) => p?.name);
+    expect(names).toContain("agentcorp-llm-proxy");
+  });
+});

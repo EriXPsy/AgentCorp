@@ -54,13 +54,13 @@ export function llmProxyPlugin(): Plugin {
           return;
         }
 
-        const apiKey = process.env.LLM_API_KEY;
-        const baseUrl = process.env.LLM_BASE_URL;
-        const model = process.env.LLM_MODEL;
+        const apiKey = process.env.LLM_API_KEY || process.env.ASCEND_API_KEY;
+        const baseUrl = process.env.LLM_BASE_URL || process.env.ASCEND_BASE_URL;
+        const model = process.env.LLM_MODEL || process.env.ASCEND_MODEL;
         if (!apiKey || !baseUrl || !model) {
           sendJson(res, 503, {
             error: 'llm_not_configured',
-            detail: '缺少 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL（见 .env）',
+            detail: '缺少 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL（或 ASCEND_* 等价项，见 .env）',
           });
           return;
         }
