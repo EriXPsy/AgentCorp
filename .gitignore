@@ -55,8 +55,11 @@ scripts/qa/_fesrc/
 test-results/
 
 # ===== 后端 Python 缓存 =====
+# 通用规则：原先只写 model-service/**/__pycache__/，导致 .trellis 下 19 个 .pyc 被跟踪
+__pycache__/
+*.pyc
+*.pyo
 model-service/.pytest_cache/
-model-service/**/__pycache__/
 model-service/pytest-cache-files-/
 
 # ===== 临时目录 =====
@@ -122,5 +125,12 @@ update/
 
 # PPT 交付以 pptx 为准，PDF 由本地导出，不入仓
 方案PPT/*.pdf
+# 二进制演示文稿一律不入仓（曾有误传 4.75 MB pptx 至仓库根目录）
+*.pptx
+*.ppt
+
+# 运行时生成的标记 / 缓存（含 UUID，每次运行都变，非源码）
+.trellis/.runtime/
+
 scripts/eval/squad-bench-results/
 model-service/data/style_memory/
