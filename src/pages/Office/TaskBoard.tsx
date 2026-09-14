@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, memo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, XCircle, Clock, ChevronRight, ClipboardList, ShieldAlert, Plus, X, Users, FolderOpen, Download, Globe, RotateCcw, MessageCircle, FileText, TriangleAlert, History, Trash2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ChevronRight, ClipboardList, ShieldAlert, Plus, X, Users, FolderOpen, Download, Globe, RotateCcw, MessageCircle, FileText, TriangleAlert, History, Trash2, FlaskConical } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useApprovalsStore } from '@/stores/approvals';
@@ -24,6 +24,7 @@ import MarkdownContent from '@/pages/Chat/MarkdownContent';
 import { invokeIpc } from '@/lib/api-client';
 import { extractA2aParticipants, summarizeA2aEvents, parseA2aRoute } from '@/lib/a2a-timeline';
 import { isAvatarImage } from '@/lib/utils';
+import { buildKnowledgeAlchemyDraft } from '@/engine/squad/taskTemplates';
 
 const COLUMNS: Array<{ key: TaskStatus; label: string; accent: string }> = [
   { key: 'todo', label: '待办', accent: '#9ca3af' },
@@ -172,6 +173,24 @@ function CreateTeamTaskModal({ teams, onClose }: { teams: TeamSummary[]; onClose
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {teams.length > 0 && (
+          // 知识炼金快速开始：一键预填知乎任务草稿（标题/描述自带模板命中词），
+          // 用户只需粘贴链接与正文即可触发五阶段四件套流程
+          <button
+            type="button"
+            onClick={() => {
+              const draft = buildKnowledgeAlchemyDraft();
+              setTitle(draft.title);
+              setDescription(draft.description);
+            }}
+            className="neu-btn flex items-center gap-1.5 self-start rounded-lg px-3 py-1.5 text-[12px] font-semibold"
+            style={{ color: '#6366f1' }}
+          >
+            <FlaskConical className="h-3.5 w-3.5" />
+            知识炼金：粘贴知乎问题，炼出知识四件套
+          </button>
+        )}
 
         {teams.length === 0 ? (
           <div className="flex flex-col gap-3">
