@@ -83,6 +83,22 @@ const knowledgeAlchemy: TaskTemplate = {
 
 const TEMPLATES: TaskTemplate[] = [knowledgeAlchemy];
 
+/**
+ * 「知识炼金」快速开始的预填草稿（Plan B：不接知乎 API，用户手动粘贴）。
+ * 返回的标题/描述自带模板命中词（知识炼金 / 知乎），粘贴即触发五阶段流程；
+ * UI 层（新建团队任务弹窗）只做填充，不内联文案，方便单测锁住契约。
+ */
+export function buildKnowledgeAlchemyDraft(): { title: string; description: string } {
+  return {
+    title: '知识炼金：',
+    description:
+      '知乎问题链接：\n\n' +
+      '问题/回答正文粘贴处：\n\n' +
+      '（团队将按「资料汇总 → 观点对照 → 结构化产出 → 交叉校验 → 终稿整合」五阶段，' +
+      '炼出知识四件套：知识卡片 / 知识清单 / 思维导图 / 学习路径）',
+  };
+}
+
 /** 命中第一个匹配的模板；未命中返回 null（走默认 LLM 拆解）。 */
 export function matchTaskTemplate(taskText: string): TaskTemplate | null {
   const text = taskText ?? '';
