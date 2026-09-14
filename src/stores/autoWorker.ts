@@ -638,6 +638,7 @@ async function runOne(
             teamName: team.name,
             subtasks: orch.subtasks,
             deliverable: orch.deliverable,
+            taskText: [task.title, task.description].filter(Boolean).join('\n'),
           });
           realOutput = delivery.output;
           deliverableDir = delivery.deliverableDir;

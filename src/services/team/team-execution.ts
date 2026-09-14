@@ -1,5 +1,6 @@
 import { buildDeliverableFiles } from '@/engine/squad/deliverableFiles';
 import type { SubTaskResult } from '@/engine/squad/squadOrchestration';
+import { buildTemplateDeliverableFiles, matchTaskTemplate } from '@/engine/squad/taskTemplates';
 import { runRealChat } from '@/engine/llm/realExecutor';
 import { invokeIpc } from '@/lib/api-client';
 import { useAgentsStore } from '@/stores/agents';
@@ -72,12 +73,19 @@ export async function buildTeamDeliveryArtifacts(input: {
   teamName: string;
   subtasks: SubTaskResult[];
   deliverable: string;
+  /** 任务标题+描述：命中任务流程模板（如「知识炼金」）时按模板拆分交付文件。 */
+  taskText?: string;
 }): Promise<{ output: string; deliverableDir?: string }> {
   let output = buildTeamDeliveryOutput(input.teamName, input.subtasks, input.deliverable);
   let deliverableDir: string | undefined;
 
   try {
-    const files = buildDeliverableFiles(input.subtasks, input.deliverable);
+    // 模板任务（知识炼金）：优先按四件套标题切成独立 .md；拆不出来回退默认构建。
+    const templateFiles =
+      input.taskText && matchTaskTemplate(input.taskText)
+        ? buildTemplateDeliverableFiles(input.subtasks, input.deliverable)
+        : null;
+    const files = templateFiles ?? buildDeliverableFiles(input.subtasks, input.deliverable);
     const saved = await invokeIpc<{ success: boolean; dir?: string; saved?: string[] }>(
       'task:saveDeliverables',
       { taskId: input.taskId, files },
