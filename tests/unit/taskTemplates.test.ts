@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   matchTaskTemplate,
   buildTemplateDeliverableFiles,
+  buildKnowledgeAlchemyDraft,
   KNOWLEDGE_SECTIONS,
 } from '@/engine/squad/taskTemplates';
 import {
@@ -97,6 +98,23 @@ describe('buildTemplateDeliverableFiles 四件套拆分', () => {
   it('子任务都没有时看汇总；汇总也没有 → null', () => {
     expect(buildTemplateDeliverableFiles([st('S5 终稿整合', null)], FINAL_OUTPUT)!.length).toBe(5);
     expect(buildTemplateDeliverableFiles([st('S5 终稿整合', null)], '无关汇总')).toBeNull();
+  });
+});
+
+describe('buildKnowledgeAlchemyDraft 快速开始预填', () => {
+  it('预填标题+描述必命中知识炼金模板（粘贴即触发五阶段）', () => {
+    const draft = buildKnowledgeAlchemyDraft();
+    expect(matchTaskTemplate(`${draft.title}\n${draft.description}`)?.id).toBe('knowledge-alchemy');
+  });
+
+  it('草稿含粘贴位与四件套说明，标题留空待用户补问题', () => {
+    const draft = buildKnowledgeAlchemyDraft();
+    expect(draft.title).toBe('知识炼金：');
+    expect(draft.description).toContain('知乎问题链接');
+    expect(draft.description).toContain('粘贴');
+    for (const sec of KNOWLEDGE_SECTIONS) {
+      expect(draft.description).toContain(sec);
+    }
   });
 });
 
