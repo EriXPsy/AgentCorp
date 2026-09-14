@@ -49,6 +49,7 @@ import type { Team } from '../../types/team';
 import type { ChatFn, ChatHints, ChatMessage } from './squadCollaboration';
 import { checkCodeOutput } from './outputCheck';
 import { routeBySquadLeader, type RoutingCandidate } from './squadRouting';
+import { matchTaskTemplate } from './taskTemplates';
 
 /** 实况发言事件：编排关键阶段的开始/进展/结束（UI 直播气泡用；纯内存，不落盘）。 */
 export type AgentSpeakPhase =
@@ -486,6 +487,15 @@ export async function runSquadOrchestration(
     .map((c) => `- ${c.agentId}${c.jobType ? `（擅长工种：${c.jobType}）` : ''}${c.agentId === team.leaderId ? '（leader）' : ''}`)
     .join('\n');
   const experienceText = input.experience?.trim();
+  // 任务流程模板：命中（如「知识炼金」）时跳过 LLM 拆解与覆盖机检，
+  // 直接按模板预置阶段执行（模板自带 acceptance / requiredSections 契约，
+  // 且阶段划分是产品承诺，不接受模型自由发挥）。未命中走原有 LLM 拆解。
+  const taskTemplate = matchTaskTemplate(taskText);
+  let subtasks: OrchestrationSubTask[];
+  if (taskTemplate) {
+    speak(team.leaderId, 'decompose', 'start', `命中「${taskTemplate.name}」流程模板，按固定阶段执行…`);
+    subtasks = taskTemplate.buildSubtasks(taskTitle);
+  } else {
   speak(team.leaderId, 'decompose', 'start', '正在拆解任务…');
   const decomposeRaw = await call(team.leaderId, [
     {
@@ -508,7 +518,7 @@ export async function runSquadOrchestration(
   ], { maxTokens: 2500 });
 
   // 解析失败 / 空数组 → 兜底为单子任务（原任务），诚实继续而非假装拆解成功。
-  let subtasks: OrchestrationSubTask[] = parseSubTasks(decomposeRaw) ?? [
+  subtasks = parseSubTasks(decomposeRaw) ?? [
     { title: taskTitle, instruction: taskDescription || taskTitle },
   ];
 
@@ -555,6 +565,7 @@ export async function runSquadOrchestration(
     } catch {
       /* 修订失败降级：沿用首次拆解 */
     }
+  }
   }
 
   // P0-5 自留比例机检：leader 把超过一半的子任务派给自己（≥2 条且有其他在职

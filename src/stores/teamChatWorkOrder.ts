@@ -141,6 +141,7 @@ export async function runTeamChatWorkOrder(taskId: string, instruction: string):
       teamName: team.name,
       subtasks: orch.subtasks,
       deliverable: orch.deliverable,
+      taskText: [task.title, task.description].filter(Boolean).join('\n'),
     });
 
     await approvals.updateTask(taskId, {
