@@ -155,7 +155,7 @@ function isBrowserPreviewShimEnabled(): boolean {
 
 /**
  * 解析 Host API 基址：
- * - 浏览器预览 shim（同源 Web 部署，如昇腾统一环境 Web 形态）→ 当前源；
+ * - 浏览器预览 shim（同源 Web 部署，如统一算力环境 Web 形态）→ 当前源；
  * - 其余场景（Electron 回退 / 本地 dev）→ 本地 Host API（127.0.0.1:3210）。
  */
 export function resolveHostApiBase(): string {
@@ -303,7 +303,7 @@ export async function hostApiStream(
 ): Promise<{ status: number; ok: boolean; body: ReadableStream<Uint8Array> }> {
   const ipc = window.electron?.ipcRenderer;
 
-  // 同源 Web 形态（昇腾统一环境：渲染进程与 model-service 同源，无 Electron
+  // 同源 Web 形态（统一算力环境：渲染进程与 model-service 同源，无 Electron
   // 主进程）或纯浏览器环境：流式端点直接 fetch，不再要求 IPC。
   if (!ipc || isBrowserPreviewShimEnabled()) {
     const response = await fetch(`${resolveHostApiBase()}${path}`, {

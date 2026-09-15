@@ -1,4 +1,4 @@
-# AgentCorp 昇腾编排样例：vLLM-Ascend 推理服务 + model-service 评委容器
+# AgentCorp 国产算力（Ascend）编排样例：vLLM-Ascend 推理服务 + model-service 评委容器
 #
 # 用法（在仓库根目录执行）：
 #   docker compose -f deploy/ascend/docker-compose.ascend-llm.yml up --build
@@ -8,7 +8,7 @@
 #   agentcorp-model —— model-service 评委容器（JUDGE_BACKEND=http 指向上面的服务）
 #
 # 可按需裁剪：
-#   - 只起评委（推理服务已在别处/华为云 MaaS 就绪）：删掉 ascend-llm，
+#   - 只起评委（推理服务已在别处/云端 MaaS 就绪）：删掉 ascend-llm，
 #     把 agentcorp-model 的 JUDGE_BASE_URL 指向外部端点即可；
 #     也可以直接用更精简的 model-service/docker-compose.ascend.yml。
 #   - 只起推理：删掉 agentcorp-model。
@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------------
-  # model-service 评委容器（复用仓库已有的昇腾 Dockerfile）
+  # model-service 评委容器（复用仓库已有的 Ascend Dockerfile）
   # ------------------------------------------------------------------
   agentcorp-model:
     build:

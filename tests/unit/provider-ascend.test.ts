@@ -1,7 +1,7 @@
 /**
  * tests/unit/provider-ascend.test.ts
  *
- * 华为昇腾（huawei-ascend）provider 注册回归锁定：
+ * 国产 NPU（huawei-ascend）provider 注册回归锁定：
  *  1) 共享 registry（electron/shared/providers）定义完整：
  *     api 协议 openai-completions、baseUrl 占位、apiKeyEnv=ASCEND_API_KEY；
  *  2) PROVIDER_TYPES / BUILTIN_PROVIDER_TYPES（前后端双注册表）均包含 huawei-ascend；
@@ -9,7 +9,7 @@
  *  4) key 校验兼容性：provider-validation.ts 的 getValidationProfile 按
  *     providerConfig.api 选择 profile，api=openai-completions 时走
  *     OpenAI 兼容校验（GET /models + chat/completions 兜底探测），
- *     与 vLLM-Ascend / MindIE / 华为云 MaaS 的 OpenAI 兼容端点天然兼容。
+ *     与 vLLM-Ascend / MindIE / 云端 MaaS 的 OpenAI 兼容端点天然兼容。
  *     这里锁定该校验所需的输入（apiKeyEnv + providerConfig.api + baseUrl），
  *     防回归（不联网探测真实端点）。
  */
@@ -47,7 +47,7 @@ describe('huawei-ascend provider 注册', () => {
   it('registry 中 huawei-ascend 定义完整（api/baseUrl/apiKeyEnv）', () => {
     const definition = getProviderDefinition(ASCEND_ID);
     expect(definition).toBeDefined();
-    expect(definition?.name).toContain('昇腾');
+    expect(definition?.name).toContain('NPU');
     expect(definition?.requiresApiKey).toBe(true);
     expect(definition?.envVar).toBe('ASCEND_API_KEY');
     expect(definition?.category).toBe('compatible');
@@ -64,7 +64,7 @@ describe('huawei-ascend provider 注册', () => {
   it('前端 PROVIDER_TYPE_INFO 同步存在且与后端定义一致', () => {
     const info = PROVIDER_TYPE_INFO.find((t) => t.id === ASCEND_ID);
     expect(info).toBeDefined();
-    expect(info?.name).toContain('昇腾');
+    expect(info?.name).toContain('NPU');
     expect(info?.requiresApiKey).toBe(true);
     expect(info?.defaultBaseUrl).toBe('http://ascend-host:8000/v1');
     expect(info?.showBaseUrl).toBe(true);

@@ -1,7 +1,7 @@
 /**
  * HiClaw / AgentTeams CRD 导出
  * --------------------------------------------------------------------------
- * 背景：AgentTeams 是阿里云的多智能体治理与协作平台，其管理层基于开源项目
+ * 背景：AgentTeams 是一个多智能体治理与协作平台，其管理层基于开源项目
  * HiClaw（github.com/agentscope-ai/HiClaw），采用 **K8s-native 声明式 CRD**
  * （apiVersion `hiclaw.io/v1beta1`）描述组织结构，并显式分层为
  * 平台管控（TeamAdmin）→ 业务协作（TeamLeader）→ 执行（Worker）。
@@ -11,7 +11,7 @@
  * 本模块把映射变成一条命令：4 张 RoleCard → HiClaw 声明式 CRD YAML，
  * 可直接对照 HiClaw CRD 规范逐字段核，从而量化迁移成本。
  *
- * 映射对照（这也是 PPT 上那张表的真相源）：
+ * 映射对照（这也是迁移对照表的真相源）：
  *
  *   HiClaw CRD          AgentCorp 对应物                      落点
  *   ─────────────────── ───────────────────────────────────── ──────────────────────
@@ -260,7 +260,7 @@ export function exportHiclawManifest(
   return header + docs.map(resourceToYaml).join('\n---\n') + '\n';
 }
 
-/** 迁移成本自查表（供文档与 PPT 直接引用）。 */
+/** 迁移成本自查表（供文档直接引用）。 */
 export const MIGRATION_MATRIX: Array<{
   concern: string;
   agentcorpNow: string;

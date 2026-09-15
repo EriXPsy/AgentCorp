@@ -89,7 +89,7 @@ app.include_router(designer_route.router)
 class SPAStaticFiles(StaticFiles):
     """SPA 静态托管：未命中的前端路由回退到 index.html。
 
-    用于昇腾统一环境 Web 形态（服务端同源托管 dist-web 构建产物）。
+    用于统一算力环境 Web 形态（服务端同源托管 dist-web 构建产物）。
     /api 与 /uploads 前缀不回退——它们的 404 应如实返回，避免把 API 错误
     静默吞成 HTML 页面。
     """

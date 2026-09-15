@@ -1,4 +1,4 @@
-# AgentCorp 昇腾统一环境镜像（Web 形态）
+# AgentCorp 国产算力统一环境镜像（Web 形态）
 #
 # 与 model-service/Dockerfile 的区别：多阶段构建，先把前端 Web 预览产物
 # （dist-web）打进来，运行时由 model-service 同源托管（WEB_ROOT=/app/web），
@@ -26,7 +26,7 @@ COPY electron ./electron
 COPY public ./public
 RUN pnpm build:web
 
-# ---------- 阶段 2：模型服务运行时（昇腾 CANN 基座） ----------
+# ---------- 阶段 2：模型服务运行时（CANN 算力基座） ----------
 # 基座镜像按运行环境覆盖：--build-arg ASCEND_BASE_IMAGE=<image>
 # 默认取 CANN 9.1 社区镜像；FlagOS 运行时镜像（FlagScale/FlagOS starter kit）
 # 正式发布后可直接以同名 ARG 切换基座（登记见 docs/ascend-adaptation-plan.md R9）。

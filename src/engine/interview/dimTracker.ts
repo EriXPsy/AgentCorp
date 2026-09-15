@@ -448,7 +448,6 @@ export function recommendationOf(
  * 与上岗后绩效做闭环校验（验证「面试承诺 vs 实际」）。
  * 注意：原 patch 把未使用变量留在 recommendationOf 内 → 死代码 + lint 失败；
  * 此处改为独立纯函数，由 interview_store 调用并挂载到报告。
- * 原内部阶段代号「S3 上岗绩效」已中性化为「上岗后绩效闭环」。
  */
 export function recommendationTrace(
   stageScoreTotal: number | null,

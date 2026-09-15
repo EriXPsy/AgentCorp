@@ -24,7 +24,7 @@ GoldReference：面试 code 题的「金标准正确性」客观评分器。
 学术依据：
 - SWE-bench（arXiv:2310.06770）：以固定测试夹具做 pass/fail 判定，验证的是
   「既有测试能否通过」，而非候选自写测试 —— 本模块消费的就是这种 curated 夹具。
-- 与对照基准校准（Tu et al., 2026，arXiv:2604.24955）方向一致：用 gold reference
+- 与对照基准校准方向一致：用 gold reference
   抑制「自证合格」失真，让客观正确性结论可被机器复核。
 """
 from __future__ import annotations

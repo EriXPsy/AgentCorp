@@ -3,7 +3,7 @@
  * /api/llm/chat 的平台无关核心逻辑：请求校验 → 调 OpenAI 兼容上游 → 统一响应。
  *
  * 被两个宿主复用，行为必须完全一致：
- * - vite-plugin-llm-proxy.ts（本地 dev / 昇腾服务器 web 预览的中间件）
+ * - vite-plugin-llm-proxy.ts（本地 dev / 国产算力服务器 web 预览的中间件）
  * - api/llm/chat.ts（Vercel Serverless Function）
  *
  * 安全约束：LLM_API_KEY 只在 Node 侧（process.env）读取，绝不进浏览器包。

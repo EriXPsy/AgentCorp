@@ -7,7 +7,7 @@ NeurIPS 2026 Workshop on LLM Evaluation.
 
 ## Core Research Questions
 
-1. **RQ1**: Does the SPADE adaptive challenge loop (Designer + Reflector + PromptEvolver)
+1. **RQ1**: Does the adaptive challenge loop (Designer + Reflector + PromptEvolver)
    produce better team differentiation than fixed benchmarks?
 2. **RQ2**: Does semantic memory (StyleMemory) outperform metric-based profiling for
    predicting team performance on novel challenges?
@@ -45,7 +45,7 @@ Download: `python scripts/download_benchmarks.py`
 python scripts/run_benchmark.py --benchmark humaneval --models deepseek-chat,gpt-4o,claude-sonnet-4-20250514 --trials 3
 ```
 
-### Experiment 2: SPADE Adaptive Challenge vs Fixed (Week 2-3)
+### Experiment 2: Adaptive Challenge vs Fixed (Week 2-3)
 
 **Purpose**: Compare adaptive challenges (Designer-generated) vs fixed HumanEval problems.
 

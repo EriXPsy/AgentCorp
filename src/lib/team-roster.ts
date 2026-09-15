@@ -14,7 +14,7 @@ export interface RosterMember {
   id: string;
   name: string;
   avatar?: string | null;
-  /** 展示副标题（Knowe 的「UI/UX 设计」位）：responsibility 优先，回退 teamRole 标签 */
+  /** 展示副标题（业界主流协作工具的「UI/UX 设计」位）：responsibility 优先，回退 teamRole 标签 */
   role: string;
   status: RosterStatus;
   isLeader: boolean;

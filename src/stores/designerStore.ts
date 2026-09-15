@@ -1,6 +1,6 @@
 /**
  * src/stores/designerStore.ts
- * SPADE Designer Zustand store：StyleMemory 状态 + 出题/反思动作。
+ * 自适应出题器（Designer）Zustand store：StyleMemory 状态 + 出题/反思动作。
  *
  * 设计：
  * - StyleMemory / challenge / reflection 均按 team_id 缓存，避免 TeamSpace / Evaluation 互相覆盖

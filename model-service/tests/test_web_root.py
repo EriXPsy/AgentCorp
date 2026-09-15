@@ -1,6 +1,6 @@
 """
 model-service/tests/test_web_root.py
-昇腾统一环境 Web 形态（WEB_ROOT 静态托管 + 路由别名）的契约验证。
+统一算力环境 Web 形态（WEB_ROOT 静态托管 + 路由别名）的契约验证。
 
 覆盖：
   1) mount_web_root：WEB_ROOT 指向含 index.html 的目录时，GET / 返回 200；

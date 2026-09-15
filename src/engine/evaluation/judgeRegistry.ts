@@ -8,11 +8,11 @@
  *  - 调用方只经 JudgeHub(judgeClient) 取 Evaluator，不直接 import 引擎文件——
  *    消除 src/services 下 14 个散落 judge/scoring 服务各自 import 的耦合。
  *  - 注册时强制 targetDims ⊆ RADAR_DIMS（单一规则源，维度不得漂移）。
- *  - PR#41 新增的 growth / enterpriseFit / arena 必须改写为 Evaluator 并在此注册，
+ *  - 新增的 growth / enterpriseFit / arena 必须改写为 Evaluator 并在此注册，
  *    否则 listEvaluators() 不含它们，M2 契约测试（tests/contract/registry.test.ts）红。
  *
  * 零运行副作用：本文件只定义契约与注册表，**不预注册**任何 Evaluator——
- * 各模块在自身加载时用 registerEvaluator 登记，避免循环依赖与回归 PR#41。
+ * 各模块在自身加载时用 registerEvaluator 登记，避免循环依赖与回归。
  */
 import type { RadarDim } from "../../types/evaluation";
 import { RADAR_DIMS } from "../scoring/registry";

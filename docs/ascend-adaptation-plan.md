@@ -1,6 +1,6 @@
-# AgentCorp 昇腾适配方案
+# AgentCorp 国产 NPU（Ascend）适配方案
 
-> 统一异构算力环境适配 · 工程基础设计（以昇腾 NPU 为例）
+> 统一异构算力环境适配 · 工程基础设计（以国产 NPU 为例）
 > 模型：MiniCPM-o 4.5（全模态，约 9B，OpenCompass 综合 77.6）
 > 版本：v0.3（落地对齐版）
 > 适用范围：统一异构算力环境复现验证 + 单容器「可运行 Web Demo」交付
@@ -13,7 +13,7 @@
 
 ## 1. 目标与范围
 
-**目标**：让 AgentCorp 的「全模态 HR 总监」评委模型 MiniCPM-o 4.5 在统一昇腾环境中跑通真实多模态推理，并以**单容器可运行 Web Demo** 形态对外交付。
+**目标**：让 AgentCorp 的「全模态 HR 总监」评委模型 MiniCPM-o 4.5 在统一国产算力环境中跑通真实多模态推理，并以**单容器可运行 Web Demo** 形态对外交付。
 
 **范围边界（明确不做什么）**：
 
@@ -23,7 +23,7 @@
 | Demo 形态 | ✅ 统一环境下可访问的 Web Demo（浏览器打开即用） | ✗ Electron 桌面 App 作为正式交付形态 |
 | 前端 | ✅ 复用现有 React 评估页（六维雷达/语音讲解/证据留痕） | ✗ 重写前端 UI |
 | 后端 | ✅ model-service（FastAPI + SSE）承载真实推理 | ✗ 新增独立网关/微服务 |
-| 提交材料 | ✅ Web Demo + 开源仓库 + PPT + 项目说明 + 演示视频 | ✗ 商业部署/高并发生产化 |
+| 交付物 | ✅ Web Demo + 开源仓库 + 项目说明 + 演示视频 | ✗ 商业部署/高并发生产化 |
 
 **交付判定（可映射到通用评估维度）**：应用完整度、交互体验、模型能力展示（四模态交叉验证）、场景价值（HR 筛选）、工程质量、演示质量、复现可行性。
 
@@ -84,7 +84,7 @@ def load_minicpmo(model_path: str) -> MiniCPMModel:
 
 | 步骤 | 操作 | 备注 |
 |------|------|------|
-| 1 | 注册登录 HiDevLab 平台 | 华为开发者账号 |
+| 1 | 注册登录 HiDevLab 平台 | 平台开发者账号 |
 | 2 | 进入「体验 IDE」 | 在线开发/调试 |
 | 3 | 创建环境 | 选择 Ascend 算力规格（建议 910B/910A，权重需 910B/910A，见 §4.1） |
 | 4 | 申请权限 | 审核 1–3 工作日 |
@@ -110,7 +110,7 @@ def load_minicpmo(model_path: str) -> MiniCPMModel:
 **理由**：
 1. **版本自洽**：FlagOS「开箱即用多芯版」镜像把 `torch + torch_npu + flag_gems + CANN` 按同一组合预编译并验证，`import flag_gems` 即切换 Ascend 后端，与现有 `transformers` 代码同构（§2.3），改动最小。
 2. **避开 Python 3.12 错配**：CANN devel 是 Python 3.12，而 Ascend ML wheel 多数仍 targeting 3.10/3.11（§3.3）。FlagOS 镜像内部自带匹配的 3.10/3.11 运行时，业务代码无需关心 3.12。
-3. **运维最少**：竞赛场景下省去 `pip` 版本对齐与编译，镜像一次性锁定，复现最稳。
+3. **运维最少**：交付场景下省去 `pip` 版本对齐与编译，镜像一次性锁定，复现最稳。
 
 > 若 HiDevLab 强制要求以 CANN 9.1.0 devel 为**唯一**基础且不允许另起 FlagOS 镜像，则走 §3.3 的「3.12 → 3.10/3.11 venv」降级方案，仍优先 `flag_gems` 后端。
 
@@ -172,10 +172,10 @@ devices:
 
 | 来源 | 地址 | 说明 |
 |------|------|------|
-| Modelers.cn（昇腾专用） | `FlagRelease/MiniCPM-o-4.5-ascend-FlagOS` | Apache 2.0，bf16，需 Ascend 910B/910A |
+| Modelers.cn（NPU 专用） | `FlagRelease/MiniCPM-o-4.5-ascend-FlagOS` | Apache 2.0，bf16，需 Ascend 910B/910A |
 | ModelScope / HuggingFace / 魔乐 | `OpenBMB/MiniCPM-o-4_5` | 官方通用权重，torch_npu/transformers 加载 |
 
-> 推荐先用 **Modelers.cn 的 Ascend 专用权重**（已做昇腾适配，匹配 FlagOS 路径），通用权重作兜底。
+> 推荐先用 **Modelers.cn 的 Ascend 专用权重**（已做 NPU 适配，匹配 FlagOS 路径），通用权重作兜底。
 
 ### 4.2 显存预算（bf16）
 
@@ -201,7 +201,7 @@ devices:
 
 ### 5.1 问题
 
-现有前端是 **Electron 桌面壳**（`package.json` 含 `electron` / `electron-builder` / `vite-plugin-electron`），在统一昇腾环境（Linux 容器/服务器，无 GUI/显示服务、未必有 pnpm/lockfile）**无法直接作为可运行 Demo 启动**。
+现有前端是 **Electron 桌面壳**（`package.json` 含 `electron` / `electron-builder` / `vite-plugin-electron`），在统一国产算力环境（Linux 容器/服务器，无 GUI/显示服务、未必有 pnpm/lockfile）**无法直接作为可运行 Demo 启动**。
 
 ### 5.2 决策：Demo 以「单容器 Web Demo」承载
 
@@ -291,7 +291,7 @@ CMD ["python3.11", "-m", "app.serve"]   # ★ 用运行时层解释器（非系�
 # ① 克隆仓库
 git clone <repo-url> agentcorp && cd agentcorp
 
-# ② 已申请 HiDevLab 统一昇腾环境（CANN 9.1.0-beta.1 devel）；
+# ② 已申请 HiDevLab 统一国产算力环境（CANN 9.1.0-beta.1 devel）；
 #    需等待实际 NPU 算力分配（确认 910B/910A 规格与 /dev/davinciN 设备号）—— 见 §9.1
 
 # ③ 构建镜像（基础 = CANN 9.1.0 devel + FlagOS 运行时层 + Web 构建阶段，见 §6）
@@ -309,7 +309,7 @@ MODEL_PATH=/models/MiniCPM-o-4.5 docker compose -f docker-compose.ascend.yml up 
 
 # ⑥ 前端访问（同一端口 8000）
 #   浏览器打开 http://<npu-host>:8000  →  Web Demo（六维雷达/语音讲解/证据留痕）
-#   端口默认只绑本机回环；评测机之外访问需把 compose 端口映射改为 "8000:8000"
+#   端口默认只绑本机回环；部署机之外访问需把 compose 端口映射改为 "8000:8000"
 
 # ⑦ 端到端验证（/health + 真实评估闭环 + 离线契约回归）
 bash scripts/e2e_ascend.sh
@@ -338,7 +338,7 @@ cd model-service && MOCK=true python -m pytest tests/ -q
 | T4 | Dockerfile / compose 增强（CANN devel 基础镜像 + FlagOS 运行时层 / 3.11 venv 兜底、权重挂载、MOCK=false、前端静态托管） | ✅ v0.3 已落地：`Dockerfile.ascend`、`docker-compose.ascend.yml`、`serve.py`(WEB_ROOT) | T1–T3 | P0 |
 | T5 | 前端承载改造（容器内构建 `dist-web/`、同源 API base、真实 wav 播放、Electron import 门控） | ✅ v0.3 已落地（wav 播放待真机核对）：`vite.web.config.ts`、`src/lib/host-api.ts` | T4（可并行） | P1 |
 | T6 | E2E 验证脚本与 `/health` 真实闭环 + 复现检查（temperature/seed 一致） | ✅ v0.3 已落地：`scripts/e2e_ascend.sh`、`tests/test_web_root.py` | T1–T5 | P1 |
-| T7 | 提交材料准备（开源仓库、Web Demo、PPT、项目说明、演示视频） | 仓库根、docs/ | T4–T6 | P1 |
+| T7 | 交付物准备（开源仓库、Web Demo、项目说明、演示视频） | 仓库根、docs/ | T4–T6 | P1 |
 
 **依赖图**：
 
@@ -389,15 +389,14 @@ graph TD
 
 ---
 
-## 10. 交付材料对齐清单
+## 10. 交付物对齐清单
 
-| 提交材料 | 状态 | 说明 / 待补 |
+| 交付物 | 状态 | 说明 / 待补 |
 |---------|------|------------|
 | 开源仓库 | 🟡 已具备骨架，待补适配 | 现有仓库结构完整；补齐 T1–T5 后即为可复现仓库 |
 | 可运行 Demo / Web Demo | 🟡 形态已定（单容器 Web Demo），待实现 | T4+T5 完成后 `docker compose up` 即出 Web Demo |
 | App | 🟡 Electron 本地版已存在 | 正式以 Web Demo 为准；Electron 保留作本地演示 |
-| PPT | 🔴 待补 | 基于本方案 + 演示脚本（`docs/demo-script-A.md`）制作 |
-| 项目说明 | 🟡 README 已含昇腾部署章节，待更新 | 补「Web Demo 形态」「复现步骤（§7）」「评分维度映射」 |
+| 项目说明 | 🟡 README 已含国产算力部署章节，待更新 | 补「Web Demo 形态」「复现步骤（§7）」「评分维度映射」 |
 | 演示视频 | 🔴 待补 | T6 验证通过后录制真实评估闭环（§7 ⑥⑦） |
 | 鼓励：交互设计说明 | 🟡 前端组件齐全，待整理 | 六维雷达/语音/证据留痕交互可成文 |
 | 鼓励：应用案例文章 | 🔴 待补 | HR 筛选场景价值文章 |

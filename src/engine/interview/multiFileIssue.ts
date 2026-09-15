@@ -9,7 +9,7 @@
  * 不实现完整多文件沙盒（沙盒在 model-service/sandbox），但搭好评测契约：
  *   - issue 描述 + 仓库上下文 + 涉及文件 + 测试集
  *   - 复杂度估算（文件数/测试数 → 难度分级）
- *   - 与 code 工种现有沙盒（PR#21 单文件）的扩展对齐
+ *   - 与 code 工种现有沙盒（单文件）的扩展对齐
  *
  * 纯函数、零外部依赖、可单测。多文件沙盒执行留 model-service 侧扩展。
  */
@@ -90,7 +90,7 @@ export function validateMultiFileIssueSpec(
   return { ok: issues.length === 0, issues };
 }
 
-/** 把单文件 issue 扩展点（PR#21 沙盒）与多文件契约对齐的适配器（纯函数）。 */
+/** 把单文件 issue 扩展点（现有沙盒）与多文件契约对齐的适配器（纯函数）。 */
 export function isMultiFileIssue(spec: MultiFileIssueSpec): boolean {
   return spec.affectedFiles.length > 1;
 }

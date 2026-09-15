@@ -20,12 +20,12 @@
  * 学术依据：
  * - 2PL IRT + EIG 选题属经典计算机自适应测试（CAT）内核（van der Linden & Glas），
  *   信息量最大化选题已被证明在题目数受限时最省题、估计最稳。
- * - CalibratedRubric（arXiv:2607.29252）：用 IRT 组装 task-adaptive rubric bank，
+ * - 相关自适应 rubric 研究：用 IRT 组装 task-adaptive rubric bank，
  *   「贝叶斯可测性过滤 + IRT 组装」提升人机一致性与排序保真度——与本模块的
  *   θ 估计 + EIG 选题同源，但其 rubric  bank 经过实证标定。
  * - 已知缺口：DEFAULT_ITEM_A=1.0 / DEFAULT_ITEM_B=0 为占位参数，尚未用真人面试
  *   数据标定区分度 a 与难度 b。EIG 在形式上正确，但 item 参数未校准会削弱选题
- *   最优性（参见 CalibratedRubric 的实证标定流程作为后续落地参照）。
+ *   最优性（相关实证标定流程可作为后续落地参照）。
  */
 
 // ── 能力 θ 离散网格（标准正态区间，覆盖绝大多数能力估计）──────────────

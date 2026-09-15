@@ -59,7 +59,7 @@
 
 - AgentCard 声明 `securitySchemes` + `security`（仿 OpenAPI），五种 scheme：**APIKey、HTTP Auth（含 Bearer）、OAuth2、OpenID Connect、mTLS**（0.3 起 skill 级也可指定 security）。来源：spec §4.5
 - 协议本身不规定凭证获取方式（out-of-band 交换）；提供 `auth-required` 任务状态做 in-task 授权委托。
-- **AgentCard JWS 签名**（0.3 起）：给能力描述文件盖加密签名防伪。PRD 已明确这是市集防伪的必选项（`docs/PRD-AgentCorp.md:197-198`「签名 Agent Card 防伪——必须从一开始就焊死」）。
+- **AgentCard JWS 签名**（0.3 起）：给能力描述文件盖加密签名防伪。产品需求已明确这是市集防伪的必选项（「签名 Agent Card 防伪——必须从一开始就焊死」）。
 
 ### 1.6 生态
 
@@ -146,7 +146,7 @@ AgentCorp 底座（fork 自 OpenClaw）已经有一套**完整但完全私有**�
 | 内部 leader → 内部 worker（sessions_spawn） | 同组织 | **保留 `chat.send` 委派，但埋点记 A2A 语义 trace**（P1） | 私有协议已可用；trace 才是评估要的 |
 | **外部 agent 被 hire 进 AgentCorp**（入站雇佣） | 跨组织 | **升级 A2A client**：市集新增「外部 A2A agent」，委派经 A2A `message/send` | 互操作是 A2A 的主场 |
 | **AgentCorp agent 被外部雇佣**（出站服务） | 跨组织 | **升级 A2A server**：暴露 AgentCard + Task endpoint | 市集「出租 agent」的标准姿势 |
-| AgentCard 签名防伪 | 跨组织 | A2A `signatures`（JWS） | PRD 已定调（`PRD-AgentCorp.md:197-198`） |
+| AgentCard 签名防伪 | 跨组织 | A2A `signatures`（JWS） | 产品需求已定调 |
 
 架构上新增一个 **A2A Adapter 层**，放在 **Electron 主进程**（不放 OpenClaw gateway 子进程——gateway 是 fork 的黑盒，帧格式私有（`manager.ts:619`），不应侵入；也不放 model-service——它只做推理）。Adapter 双向桥接：
 
@@ -173,7 +173,7 @@ SDK 选型：`@a2a-js/sdk@^1.0`（npm，a2aproject 官方 JS SDK，2026-07-28 �
 | `defaultInputModes` / `defaultOutputModes` | `["text/plain"]`，code 工种加 `"application/json"`（DataPart） | 与工种 craft 维对齐（`src/types/evaluation.ts:35-50`） |
 | `capabilities` | `{ streaming: true, pushNotifications: false }` | 先 SSE 流式，webhook 后置 |
 | `securitySchemes` / `security` | HTTP Bearer（§3.3） | — |
-| `signatures` | P3 起对上架卡片做 JWS 签名 | PRD 防伪要求（`PRD-AgentCorp.md:197-198`） |
+| `signatures` | P3 起对上架卡片做 JWS 签名 | 防伪需求 |
 | `iconUrl` | 模板 `avatar.png/jpg/svg`（`openclaw-workspace.ts:423-435`） | 当前是 data URL，需改为可访问 URL 或省略 |
 | ~~`rating` / `hiredCount`~~ | **不映射**——现在是随机数（`openclaw-workspace.ts:449-450`） | 待评估档案（`EvaluationProfile`）接入后填真实值 |
 
@@ -301,7 +301,7 @@ OpenClaw gateway 是 fork 的子进程、帧格式私有（`manager.ts:619-621`�
 
 ### 5.4 范围边界（明确不做）
 
-- 不做多实例 AgentCorp 之间的联邦/目录服务（ANP 层的事，PRD 分层图 `PRD-AgentCorp.md:181-189` 已划分）。
+- 不做多实例 AgentCorp 之间的联邦/目录服务（ANP 层的事，产品分层设计已划分）。
 - 不做 push notification webhook（Demo 无公网回调，SSE + 轮询足够）。
 - 不改 OpenClaw gateway 本体、不动内部 `chat.send` 委派链路。
 - 不在 P1–P3 追求 AgentCard 签名的完整 PKI（先用本地密钥对签名/验签，CA 体系后置）。
@@ -316,4 +316,4 @@ OpenClaw gateway 是 fork 的子进程、帧格式私有（`manager.ts:619-621`�
 - Google 首发博客：https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/
 - A2A↔MCP 分工：https://a2a-protocol.org/latest/
 - JS SDK：https://github.com/a2aproject/a2a-js ；Python SDK：https://github.com/a2aproject/a2a-python
-- 项目内：PRD 的 A2A 定位与签名卡片要求 `docs/PRD-AgentCorp.md:20`、`:181-201`
+- 项目内：A2A 定位与签名卡片要求以产品需求文档为准（内部文档，不入仓）

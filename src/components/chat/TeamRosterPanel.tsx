@@ -1,6 +1,6 @@
 /**
  * src/components/chat/TeamRosterPanel.tsx
- * 团队成员花名册右栏（Knowe 风格）：「成员 · N」头 + 成员行
+ * 团队成员花名册右栏（业界主流协作界面形态）：「成员 · N」头 + 成员行
  * （圆头像 + 名字/角色副标题 + 右侧状态点：忙碌 amber / 空闲 green / 离线 gray）。
  * 点击成员行触发私聊回调；数据来源：teams/agents/approvals store，
  * 忙闲由 in-progress 任务 assignee 实时推导（见 lib/team-roster）。

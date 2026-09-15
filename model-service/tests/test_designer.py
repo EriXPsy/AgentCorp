@@ -1,6 +1,6 @@
 """
 model-service/tests/test_designer.py
-SPADE Designer 的单测。
+自适应出题器（Designer）的单测。
 
 覆盖：
 1. Designer prompt 构建

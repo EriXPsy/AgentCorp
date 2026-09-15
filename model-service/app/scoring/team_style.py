@@ -7,7 +7,7 @@ model-service/app/scoring/team_style.py
 （声明重点、成员、经验卡片），不做任何从评测/产出中合成的固定指标判断。
 
 演化的风格理解（维度强弱、通过率、难度上限、能力前沿等）不在这里计算，
-而是交给 StyleMemory（style_memory.py）通过 SPADE 风格的语义记忆 + Designer
+而是交给 StyleMemory（style_memory.py）通过自博弈语义记忆 + Designer
 反思来涌现。本模块只做纯数据容器（dataclass + 一个纯函数），不碰网络、不碰 LLM。
 """
 from __future__ import annotations

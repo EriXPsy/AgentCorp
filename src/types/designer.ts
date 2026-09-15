@@ -1,6 +1,6 @@
 /**
  * src/types/designer.ts
- * SPADE Designer / StyleMemory 前端类型定义。
+ * 自适应出题器（Designer）/ StyleMemory 前端类型定义。
  *
  * 与后端 model-service/app/scoring/style_memory.py 的 StyleMemory dataclass
  * 和 designer_route.py 的请求/响应模型对齐。

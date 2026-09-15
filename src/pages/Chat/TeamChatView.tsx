@@ -417,7 +417,7 @@ export function TeamChatView({ teamId }: { teamId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* 团队头（Knowe 风格）：左侧 团队名 + 实时状态行；右侧 任务入口 + 成员头像叠放（点击开花名册） */}
+      {/* 团队头（业界主流协作界面形态）：左侧 团队名 + 实时状态行；右侧 任务入口 + 成员头像叠放（点击开花名册） */}
       <div className="shrink-0 border-b border-black/[0.06] px-8 py-3">
         <div className="mx-auto flex max-w-[1000px] items-center gap-3">
           <Users className="h-4 w-4 shrink-0" style={{ color: 'var(--neu-ink)' }} />
@@ -522,7 +522,7 @@ export function TeamChatView({ teamId }: { teamId: string }) {
                       )}
                       <span className="rounded px-1 py-px text-[9px] font-bold" style={{ background: '#FFD23333', color: '#b8860b' }}>leader</span>
                     </div>
-                    {/* Knowe 风格派发确认卡：倒计时/终态纯前端按事件 createdAt 计算，协议不变 */}
+                    {/* 派发确认卡：倒计时/终态纯前端按事件 createdAt 计算，协议不变 */}
                     <TaskDraftCard
                       card={card}
                       createdAt={item.draftCreatedAt}

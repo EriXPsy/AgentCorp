@@ -1,6 +1,6 @@
 """
 model-service/app/routes/designer_route.py
-SPADE Designer 路由：自适应出题 + 反思回写。
+自适应出题器（Designer）路由：出题 + 反思回写。
 
 流程（事件驱动，实时演进）：
   POST /api/designer/challenge → 读取 StyleMemory → Designer 出题 → 返回题目

@@ -63,7 +63,7 @@ async def api_evaluate(req: EvaluationRequest):
     return EventSourceResponse(event_gen())
 
 
-# 同源部署（昇腾统一环境 Web 形态）下的路径别名：前端统一以 /api/evaluate/run
+# 同源部署（统一算力环境 Web 形态）下的路径别名：前端统一以 /api/evaluate/run
 # 调用；保留 /api/evaluate-run 兼容既有客户端（Electron Host API）。
 @router.post("/api/evaluate-run")
 @router.post("/api/evaluate/run")
