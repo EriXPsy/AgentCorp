@@ -15,7 +15,7 @@ model-service/app/scoring/craft_judge.py
 4. 温度 0 + 固定题面 —— 保证效果可验证、结论可复现。
 
 学术依据：
-- Rulers: From Rubrics to Reliable Scores（arXiv:2601.08654）提出把人类 rubric
+- 相关 rubric 校准研究提出把人类 rubric
   转成稳定可审计评分的三阶段框架：① 锁定任务级 rubric（防执行漂移）② 清单式逐条
   判定 + 证据类型标注 + 逐字引文校验（闭合「不可核验打分」）③ 事后校准对齐人类分。
   本模块的「逐 checkpoint hit+quote」「无 quote 即降 miss」「参考答案锚定天花板」

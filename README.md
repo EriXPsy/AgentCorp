@@ -239,7 +239,7 @@ agentcorp/
 
 | 路径 | 后端 | 适用场景 | 硬件要求 |
 |---|---|---|---|
-| **A（默认推荐）** | `JUDGE_BACKEND=http` | 任何 OpenAI 兼容云服务（阿里云百炼/通义、火山方舟、OpenAI…） | 无，联网即可 |
+| **A（默认推荐）** | `JUDGE_BACKEND=http` | 任何 OpenAI 兼容云服务（OpenAI、火山方舟、自建 vLLM 等） | 无，联网即可 |
 | B | `JUDGE_BACKEND=http` + 本地 vLLM | 自建推理服务 | GPU |
 | C | 端侧 GGUF | 离线复现、评委笔记本 | CPU/Metal 即可 |
 | D | 本机全量权重 | 需要视觉/音频模态 | GPU 或异构加速卡（NPU 等） |
@@ -250,12 +250,12 @@ agentcorp/
 cd model-service
 pip install -r requirements.txt
 
-# 以阿里云百炼（DashScope OpenAI 兼容模式）为例：
+# 以任意 OpenAI 兼容云服务为例（火山方舟 Ark / OpenAI / 自建 vLLM 等）：
 MOCK=false \
 JUDGE_BACKEND=http \
-JUDGE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
+JUDGE_BASE_URL=https://ark.cn-beijing.volces.com/api/v3 \
 JUDGE_API_KEY=<your_api_key> \
-JUDGE_MODEL=qwen-plus \
+JUDGE_MODEL=deepseek-v3 \
 uvicorn app.serve:app --port 8000
 
 # 换成任意其它 OpenAI 兼容端点同理，只改这三个环境变量：
@@ -301,11 +301,11 @@ MOCK=false JUDGE_BACKEND=local DEVICE=cuda MODEL_PATH=/models/<your-omni-model> 
 `DEVICE=npu` 启用（`model_loader.py` 惰性 import，缺依赖自动降级，不崩）。
 容器部署见 `model-service/docker-compose.yml`。
 
-### 昇腾统一环境 · Web Demo（无 Electron，一条命令起全栈）
+### 国产算力统一环境 · Web Demo（无 Electron，一条命令起全栈）
 
 产品有两种形态：本地桌面端（Electron，请求经主进程 Host API 转发）与
 统一环境 Web 形态（前端构建产物由 model-service 同源托管，浏览器直接使用）。
-后者面向昇腾评测机场景：
+后者面向国产算力服务器场景：
 
 ```bash
 # 在仓库根目录执行（build context 需要前端源码）
@@ -318,7 +318,7 @@ docker compose -f model-service/docker-compose.ascend.yml up --build
   （含 SPA 路由回退与 `/api/evaluate/run` 别名）；基座镜像可经
   `ASCEND_BASE_IMAGE` 覆盖（FlagOS 运行时镜像就绪后同参切换）。
 - 默认 `MOCK=false` + NPU 设备透传（`/dev/davinci0`、`/dev/davinci_manager`）；
-  端口只绑宿主回环，评测机之外访问改为 `"8000:8000"` 并自行加前置鉴权。
+  端口只绑宿主回环，服务器之外访问改为 `"8000:8000"` 并自行加前置鉴权。
 - 部署后验证：`./scripts/e2e_ascend.sh`（/health 断言 → SSE 冒烟 → 测试套件）。
 - 完整部署 runbook、任务拆解与风险登记见 `docs/ascend-adaptation-plan.md`。
 

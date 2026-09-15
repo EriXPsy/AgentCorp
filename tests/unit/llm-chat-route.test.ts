@@ -153,7 +153,7 @@ describe('上游解析优先级', () => {
     getDefaultProviderMock.mockResolvedValue('p-ascend');
     getProviderMock.mockResolvedValue({
       id: 'p-ascend',
-      name: '昇腾',
+      name: '国产 NPU',
       type: 'huawei-ascend',
       baseUrl: 'http://npu.local:8080/v1/',
       apiProtocol: 'openai-completions',

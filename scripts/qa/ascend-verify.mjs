@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 昇腾（Ascend）OpenAI 兼容端点冒烟验证。
+ * 国产 NPU（Ascend）OpenAI 兼容端点冒烟验证。
  *
  * 对配置好的端点依次验证：
  *   ① GET  {base}/models                —— 连通性
@@ -201,7 +201,7 @@ const conclusion = allPass
 
 const statusMark = { PASS: '✅ PASS', FAIL: '❌ FAIL', SKIP: '⏭️ SKIP' };
 const lines = [
-  '# 昇腾端点冒烟验证报告',
+  '# 国产 NPU 端点冒烟验证报告',
   '',
   `生成时间：${now}（由 \`verify:ascend\` 自动生成，勿手改）`,
   '',

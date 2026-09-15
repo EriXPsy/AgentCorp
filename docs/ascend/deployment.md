@@ -1,6 +1,6 @@
-# AgentCorp 昇腾（Ascend）部署指南
+# AgentCorp 国产 NPU（Ascend）部署指南
 
-> 适用对象：在华为昇腾 NPU 环境（Atlas 800 A2 / 910B 系列等）上部署
+> 适用对象：在国产 NPU 环境（Atlas 800 A2 / 910B 系列等）上部署
 > AgentCorp 所需的 OpenAI 兼容推理端点与 model-service 评委容器。
 >
 > 本文所有具体版本号（CANN / 固件 / torch / torch_npu / vllm-ascend）均为
@@ -13,8 +13,8 @@
 
 ### 1.1 硬件与驱动
 
-- 硬件：搭载昇腾 NPU 的服务器，常见为 Atlas 800 A2 系列（910B/910B3/910B4）。
-- 固件 / 驱动：Ascend HDK 驱动固件，需与 CANN 版本配套（对应关系以昇腾官方兼容矩阵为准）。
+- 硬件：搭载国产 NPU 的服务器，常见为 Atlas 800 A2 系列（910B/910B3/910B4）。
+- 固件 / 驱动：Ascend HDK 驱动固件，需与 CANN 版本配套（对应关系以官方兼容矩阵为准）。
 - 确认设备可见：宿主机执行 `npu-smi info` 能看到 NPU 列表，且 `/dev/davinci*`、`/dev/davinci_manager` 设备节点存在。
 
 ### 1.2 软件栈（典型版本，以官方为准）
@@ -64,16 +64,16 @@ vllm serve Qwen/Qwen3-32B \
 
 ### 2.2 方式二：MindIE（简述）
 
-华为自研推理引擎 MindIE（MindIE Service）同样可暴露 OpenAI 兼容接口：
+国产推理引擎 MindIE（MindIE Service）同样可暴露 OpenAI 兼容接口：
 按 MindIE 官方文档配置模型 JSON（指定权重路径、NPU 卡数），启动
 `mindieservice_daemon` 后，默认在 `https://<host>:1025/v1` 提供
 `/models`、`/chat/completions` 等 OpenAI 兼容 API（默认开 HTTPS + 鉴权）。
 **端口、证书与鉴权配置以 MindIE 官方文档为准**——对 AgentCorp 而言，
 MindIE 与 vLLM-Ascend 的唯一区别是 baseUrl 和 API key 的取值。
 
-### 2.3 方式三：华为云 MaaS（ModelArts Studio）
+### 2.3 方式三：云端 MaaS（如 ModelArts Studio）
 
-无自有 NPU 时可直接用华为云 MaaS 上托管的 DeepSeek / Qwen 等模型的
+无自有 NPU 时可直接用云端 MaaS 上托管的 DeepSeek / Qwen 等模型的
 OpenAI 兼容端点，在控制台创建 API key 后把「endpoint + key」按 §3 填入即可，
 AgentCorp 侧配置与自建 vLLM-Ascend 完全一致。
 
@@ -86,7 +86,7 @@ AgentCorp 侧配置与自建 vLLM-Ascend 完全一致。
 ### 3.1 方式一：Settings UI（推荐）
 
 1. 打开 AgentCorp → **设置 → 模型与提供方**。
-2. 选择 **华为昇腾 (Ascend)**。
+2. 选择 **国产 NPU (Ascend)**。
 3. 填写：
    - **Base URL**：`http://<ascend-host>:8000/v1`（占位默认值 `http://ascend-host:8000/v1` 需替换为真实地址）
    - **API Key**：vLLM 默认无鉴权时可填任意非空串；MindIE / MaaS 填真实 key
@@ -97,7 +97,7 @@ AgentCorp 侧配置与自建 vLLM-Ascend 完全一致。
 
 ### 3.2 方式二：.env（跑题通道直连）
 
-复制 `.env.example` 为 `.env`，填昇腾端点（见 `.env.example` 的昇腾示例块）：
+复制 `.env.example` 为 `.env`，填 NPU 端点（见 `.env.example` 的 NPU 示例块）：
 
 ```bash
 LLM_BASE_URL=http://<ascend-host>:8000/v1
@@ -105,7 +105,7 @@ LLM_API_KEY=your_ascend_api_key
 LLM_MODEL=deepseek-ai/DeepSeek-V3
 ```
 
-评委（judge）走昇腾端点时同理设置 `JUDGE_BACKEND=http` +
+评委（judge）走 NPU 端点时同理设置 `JUDGE_BACKEND=http` +
 `JUDGE_BASE_URL` / `JUDGE_API_KEY` / `JUDGE_MODEL`。
 
 ---
@@ -166,7 +166,7 @@ corepack pnpm verify:ascend
 |------|------|------|
 | 404 Not Found | baseUrl 少了 `/v1` 后缀 | AgentCorp 填的是 OpenAI **根**端点，必须带 `/v1`：`http://host:8000/v1`（直接拼 `/chat/completions` 结尾的完整路径也可以，校验逻辑会识别） |
 | 401 / 403 | 鉴权头不对 | MindIE / MaaS 需要真实 API key（`Authorization: Bearer <key>`）；自建 vLLM 默认无鉴权，填任意非空串即可通过 UI 校验 |
-| 起服务 OOM / 加载失败 | NPU 显存不足或 dtype 不匹配 | 用 bf16 权重（昇腾主线支持好）；调小 `--max-model-len`；调大 `--gpu-memory-utilization` 的反面（vllm-ascend 下即 NPU 显存水位）；多卡加 `--tensor-parallel-size` |
+| 起服务 OOM / 加载失败 | NPU 显存不足或 dtype 不匹配 | 用 bf16 权重（NPU 主线支持好）；调小 `--max-model-len`；调大 `--gpu-memory-utilization` 的反面（vllm-ascend 下即 NPU 显存水位）；多卡加 `--tensor-parallel-size` |
 | `pip install torch_npu` 解析不到 wheel | Python 版本错配（ML wheel 多为 3.10/3.11） | 用 vLLM-Ascend 官方预构建镜像，或在 3.10/3.11 venv 内安装；不要在 Python 3.12 系统环境直接装 |
 | 推理结果异常 / 算子报错 | CANN ↔ torch ↔ torch_npu 版本三角不匹配 | 严格按 vLLM-Ascend 官方兼容矩阵整套安装，或直接用官方镜像 |
 | 容器内看不到 NPU | 设备未透传 | compose `devices` 段挂载 `/dev/davinci0`、`/dev/davinci_manager`，多卡/部分驱动版本还需 `/dev/devmm_svm`、`/dev/hisi_hdc`（见 §4 compose 注释） |

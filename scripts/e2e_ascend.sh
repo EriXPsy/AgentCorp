@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/e2e_ascend.sh
-# 昇腾统一环境部署后的端到端冒烟验证（部署 runbook 见 docs/ascend-adaptation-plan.md §7）。
+# 国产算力统一环境部署后的端到端冒烟验证（部署 runbook 见 docs/ascend-adaptation-plan.md §7）。
 #
 # 前置：docker compose -f model-service/docker-compose.ascend.yml up --build 已起。
 # 用法：./scripts/e2e_ascend.sh [BASE_URL]   （默认 http://127.0.0.1:8000）
@@ -32,4 +32,4 @@ echo "==> [3/3] model-service 测试套件（MOCK=true）"
 cd "$REPO_ROOT/model-service"
 MOCK=true python3 -m pytest tests/ -q
 
-echo "PASS: 昇腾统一环境端到端验证通过 ✅"
+echo "PASS: 国产算力统一环境端到端验证通过 ✅"

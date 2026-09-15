@@ -7,7 +7,7 @@
  *
  * 上游解析优先级：
  *   1. env LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
- *   2. env ASCEND_BASE_URL / ASCEND_API_KEY / ASCEND_MODEL（昇腾专用快捷配置）
+ *   2. env ASCEND_BASE_URL / ASCEND_API_KEY / ASCEND_MODEL（NPU 端点快捷配置）
  *   3. provider 注册表默认账号（仅 openai-completions 协议可转发；
  *      huawei-ascend / custom / ollama 等 OpenAI 兼容端点均在此列）
  *   4. 都缺失 → 503 llm_not_configured
@@ -112,7 +112,7 @@ export async function handleLlmChatRoutes(
       error: 'llm_not_configured',
       detail:
         '缺少 LLM_API_KEY/LLM_BASE_URL/LLM_MODEL，且未配置默认模型提供方' +
-        '（支持华为昇腾 MindIE / vLLM-Ascend 等 OpenAI 兼容端点，见 docs/ascend/deployment.md）',
+        '（支持国产 NPU 上的 MindIE / vLLM-Ascend 等 OpenAI 兼容端点，见 docs/ascend/deployment.md）',
     });
     return true;
   }
@@ -142,7 +142,7 @@ export async function handleLlmChatRoutes(
     return true;
   }
 
-  // SSE 真流式透传（昇腾 MindIE / vLLM-Ascend 的 OpenAI 兼容端点均支持）
+  // SSE 真流式透传（国产 NPU 上的 MindIE / vLLM-Ascend 的 OpenAI 兼容端点均支持）
   const contentType = upstreamRes.headers.get('content-type') ?? '';
   if (wantStream && upstreamRes.ok && contentType.includes('text/event-stream') && upstreamRes.body) {
     res.statusCode = 200;

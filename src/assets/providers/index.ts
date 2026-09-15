@@ -7,7 +7,7 @@ import moonshot from './moonshot.svg';
 import siliconflow from './siliconflow.svg';
 import minimaxPortal from './minimax.svg';
 import qwenPortal from './qwen.svg';
-import huaweiAscend from './huawei-ascend.svg';
+import ascend from './ascend.svg';
 import ollama from './ollama.svg';
 import custom from './custom.svg';
 
@@ -22,7 +22,7 @@ export const providerIcons: Record<string, string> = {
     'minimax-portal': minimaxPortal,
     'minimax-portal-cn': minimaxPortal,
     'qwen-portal': qwenPortal,
-    'huawei-ascend': huaweiAscend,
+    'huawei-ascend': ascend,
     ollama,
     custom,
 };

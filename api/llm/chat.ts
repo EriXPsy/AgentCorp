@@ -2,7 +2,7 @@
  * api/llm/chat.ts
  * Vercel Serverless Function：POST /api/llm/chat → 真实 LLM（OpenAI 兼容端点）。
  *
- * 与 vite-plugin-llm-proxy.ts（本地 dev / 昇腾服务器 web 预览）共用
+ * 与 vite-plugin-llm-proxy.ts（本地 dev / 国产算力服务器 web 预览）共用
  * ../_llm-core 的同一份核心逻辑，保证各宿主行为一致。
  *
  * 配置（Vercel Project Settings → Environment Variables，server-side only）：

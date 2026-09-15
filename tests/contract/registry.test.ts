@@ -6,7 +6,7 @@
  *   - 注册式 Evaluator 可被 listEvaluators / getEvaluator 取到。
  *   - 维度漂移（targetDims 非 RADAR_DIMS 子集）注册即抛 ContractViolation。
  *   - RADAR_DIMS 是唯一六维源。
- * 作为 M2 修复的验收基线：PR#43 把 PR#41 新增的 growth / enterpriseFit / arena
+ * 作为 M2 修复的验收基线：把新增的 growth / enterpriseFit / arena
  * 改写为 Evaluator 并注册后，此处的 listEvaluators 必须包含它们。
  */
 import { describe, it, expect } from "vitest";

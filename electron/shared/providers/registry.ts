@@ -296,7 +296,7 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
   },
   {
     id: 'huawei-ascend',
-    name: '华为昇腾 (Ascend)',
+    name: '国产 NPU (Ascend)',
     icon: '🔺',
     placeholder: 'your-ascend-api-key',
     model: 'Ascend',

@@ -61,7 +61,7 @@ const PANELS: Array<{ key: PanelKey; label: string; hint: string }> = [
   { key: 'ranking', label: '谁更合适', hint: '客观榜与主观榜并排对比' },
   { key: 'preference', label: '我的偏好', hint: '你的打分习惯与收敛过程' },
   { key: 'manage', label: '人员状态', hint: '上岗、维护与软退休' },
-  { key: 'challenge', label: 'Designer 记忆', hint: 'SPADE 自适应出题 · 语义记忆 · Prompt 进化' },
+  { key: 'challenge', label: 'Designer 记忆', hint: '自适应出题 · 语义记忆 · Prompt 进化' },
 ];
 
 function LifecycleDot({ state }: { state: string }) {
@@ -195,7 +195,7 @@ export function Evaluation() {
   const designerReflect = useDesignerStore((s) => s.reflect);
   const designerSelectTeam = useDesignerStore((s) => s.selectTeam);
   const designerReset = useDesignerStore((s) => s.reset);
-  // SPADE 闭环（A1）：Designer 出的自适应题。存在时作为本次评估的任务喂给
+  // 自适应出题闭环（A1）：Designer 出的自适应题。存在时作为本次评估的任务喂给
   // runEvaluation——否则 Designer 出题只在 StyleMemoryPanel 展示、从不被执行。
   const currentChallenge = useDesignerStore((s) => s.currentChallenge);
 
@@ -286,7 +286,7 @@ export function Evaluation() {
       sessionKey: session?.sessionKey ?? '',
       sessionId: session?.sessionId ?? '',
       taskId: '',
-      // SPADE 闭环（A1）：Designer 出自适应题时，用它作为本次评估任务（prompt 作
+      // 自适应出题闭环（A1）：Designer 出自适应题时，用它作为本次评估任务（prompt 作
       // description 喂给裁判）；否则回退用户手输的 taskTitle。让「出题→执行」成环。
       task: currentChallenge?.prompt
         ? {
@@ -312,7 +312,7 @@ export function Evaluation() {
         : {};
       const outcome = profile.lifecycle === 'RETIRED' ? 'failed' : 'passed';
       const designerOwnerId = resolveDesignerTeamIdForAgent(agent.id, teams);
-      // SPADE 闭环（A2）：把本次评估采集到的真实 transcript 直接从 runEvaluation
+      // 自适应出题闭环（A2）：把本次评估采集到的真实 transcript 直接从 runEvaluation
       // 返回值拿出来喂给 Reflector，避免页面闭包继续引用上一轮 lastTranscript。
       // 封顶避免 transcript 过长撑爆 LLM 上下文。反思任务身份优先用 Designer 题的
       // task_id，对齐出题记录。

@@ -9,7 +9,7 @@ Prompt 自我进化器——Designer/Reflector 的元认知层。
 - 进化后的 prompt 存入 StyleMemory，下次反思自动使用
 
 学术依据：
-- SPADE（arXiv:2608.19197）：Designer 的自我校准是能力涌现的关键
+- 相关自适应出题研究：Designer 的自我校准是能力涌现的关键
 - Reflexion（Shinn et al. 2023）：语言反馈比数值奖励更有效地驱动改进
 - Constitutional AI（Bai et al. 2022）：用自然语言原则约束输出质量
 """

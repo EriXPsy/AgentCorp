@@ -1,7 +1,7 @@
 /**
  * vite-plugin-llm-proxy.ts
  * Vite dev server 中间件：把前端的 POST /api/llm/chat 代理到真实 LLM
- * （OpenAI 兼容端点，如 DeepSeek / 火山方舟 Ark / 昇腾 MindIE）。
+ * （OpenAI 兼容端点，如 DeepSeek / 火山方舟 Ark / NPU 上的 MindIE）。
  *
  * 为什么需要它：Web 预览是纯前端（无 Electron 主进程 / 无独立后端），
  * 若把 API key 放到 VITE_* 前端变量会被打进浏览器包并暴露。这里让 key 只在
@@ -9,7 +9,7 @@
  * /api/llm/chat，绝不接触 key。
  *
  * 核心逻辑在 api/_llm-core.ts（与 Vercel Serverless Function 共用同一份，
- * 保证本地 dev / 昇腾 web 预览 / Vercel 三端行为一致）。
+ * 保证本地 dev / 国产算力 web 预览 / Vercel 三端行为一致）。
  */
 import type { Plugin, ViteDevServer } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';

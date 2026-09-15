@@ -2,7 +2,7 @@
 /**
  * tests/unit/task-draft-card.test.tsx
  *
- * 立项确认卡（src/components/chat/TaskDraftCard.tsx）Knowe 化渲染测试：
+ * 立项确认卡（src/components/chat/TaskDraftCard.tsx）渲染测试：
  * - pending：标题行「派发任务」+ 剩余 mm:ss 倒计时（fake timers 走秒）、
  *   说明文案、被指派人行、引用指令块、按钮组回调（确认/拒绝/我有新意见）
  * - 终态流转：超时（15 分钟默认窗口）→「已超时」；confirmed/cancelled/superseded → 对应文案，按钮消失

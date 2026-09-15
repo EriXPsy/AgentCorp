@@ -2,7 +2,7 @@
  * tests/unit/llm-proxy-middleware.test.ts
  *
  * vite-plugin-llm-proxy 中间件行为单测：
- * - env 解析：LLM_* 优先，缺失时回退 ASCEND_*（昇腾端点快捷配置）
+ * - env 解析：LLM_* 优先，缺失时回退 ASCEND_*（NPU 端点快捷配置）
  * - 未配置 → 503 llm_not_configured
  * - 非 POST → 405；转发 body 含 stream:false 与模型名；响应映射 content
  */
@@ -67,7 +67,7 @@ describe('env 解析与配置缺失', () => {
     expect(captured.payload.error).toBe('llm_not_configured');
   });
 
-  it('仅 ASCEND_* 配置 → 回退使用昇腾端点转发', async () => {
+  it('仅 ASCEND_* 配置 → 回退使用 NPU 端点转发', async () => {
     vi.stubEnv('ASCEND_BASE_URL', 'http://npu:8000/v1');
     vi.stubEnv('ASCEND_API_KEY', 'sk-asc');
     vi.stubEnv('ASCEND_MODEL', 'qwen2.5-7b');

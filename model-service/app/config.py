@@ -55,7 +55,7 @@ class Settings:
         self.port: int = int(os.getenv("API_PORT", "8000"))
         self.samples_dir: str = os.getenv("SAMPLES_DIR", "/app/samples")
         self.upload_dir: str = os.getenv("UPLOAD_DIR", "/app/uploads")
-        # Web 静态托管根目录（昇腾统一环境 Web 形态）：指向构建产物 dist-web 时，
+        # Web 静态托管根目录（统一算力环境 Web 形态）：指向构建产物 dist-web 时，
         # 服务端在 / 上托管前端（含 SPA 路由回退）；缺省为空表示不托管。
         self.web_root: str = os.getenv("WEB_ROOT", "")
         # Mock 模式：无 NPU 时由内置 fixture 生成事件流（与前端一致）

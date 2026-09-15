@@ -1,6 +1,6 @@
 /**
  * src/components/chat/StreamingReplyBubble.tsx
- * leader/成员回复的流式气泡（Knowe S24 形态）：名字行下方是可折叠的
+ * leader/成员回复的流式气泡（业界主流多智能体协作界面形态）：名字行下方是可折叠的
  * 「∞ AI 推理中…」面板，正文随 onDelta 逐段出现，末尾带闪烁光标
  * （光标样式复用 ChatMessage 的流式光标）。final 落房间后本气泡被移除，
  * 由正式消息气泡取代（替换逻辑在 TeamChatView）。

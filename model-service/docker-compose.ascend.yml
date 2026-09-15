@@ -1,4 +1,4 @@
-# AgentCorp 昇腾统一环境编排（Web 形态，一条命令起全栈）
+# AgentCorp 国产算力统一环境编排（Web 形态，一条命令起全栈）
 # 用法（在仓库根目录执行）：
 #   docker compose -f model-service/docker-compose.ascend.yml up --build
 # 浏览器访问 http://127.0.0.1:8000 即可使用（前端由 model-service 同源托管）。

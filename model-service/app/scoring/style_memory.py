@@ -1,6 +1,6 @@
-"""Semantic style memory for the SPADE-inspired adaptive challenge system.
+"""Semantic style memory for the adaptive challenge system.
 
-In SPADE (Self-Play through Adaptive DEsign), the Designer LLM does not merely
+In the self-play adaptive design loop, the Designer LLM does not merely
 score a team's submission with fixed metrics. Instead it keeps a *semantic
 memory* of each team's evolving coding style and engineering taste. After every
 evaluation the Designer *reflects* on the submission, appends an evidence-based
@@ -234,7 +234,7 @@ class StyleMemory:
 
 
 class Reflector:
-    """Drives the SPADE reflection loop for a team's :class:`StyleMemory`.
+    """Drives the reflection loop for a team's :class:`StyleMemory`.
 
     The reflector calls the judge LLM backend at temperature 0.3 (more
     deterministic than the Designer's generation temperature) so reflections

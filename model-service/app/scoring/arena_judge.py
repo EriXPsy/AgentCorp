@@ -23,8 +23,8 @@ Arena 个性化对决的 LLM-as-judge 裁判。
   为 pairwise + 位置 swap，El Bradley-Terry 出相对序。
 - D3 / Debate-Deliberate-Decide（arXiv:2410.04663）：对抗式多 agent（平行辩手 +
   裁判 + 可选陪审团），可证明地降低位置与冗长偏差。
-- MADRAG（arXiv:2606.06754）：Advocate-Skeptic-Judge 辩论 + rubric 对齐的 exemplar
-  检索做无训练校准；消融显示「检索驱动校准增益，辩论改善高层特质推理」。
+- Advocate-Skeptic-Judge 辩论 + rubric 对齐的 exemplar 检索做无训练校准的相关研究：
+  消融显示「检索驱动校准增益，辩论改善高层特质推理」。
   以上为 arena 从「单次绝对分」迈向「鲁棒相对序」的落地路线。
 
 已落地：pairwise + 位置 swap（见 judge_pairwise / judge_pairwise_robust）。绝对分

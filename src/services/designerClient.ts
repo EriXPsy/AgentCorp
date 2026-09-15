@@ -1,6 +1,6 @@
 /**
  * src/services/designerClient.ts
- * SPADE Designer 后端客户端：自适应出题 + 反思回写 + 记忆读取。
+ * 自适应出题器（Designer）后端客户端：出题 + 反思回写 + 记忆读取。
  *
  * 网络：经 Host API 代理（hostApiFetch → IPC → 127.0.0.1:3210 → model-service），
  * 与 craftClient / convergenceService 同一条链路。

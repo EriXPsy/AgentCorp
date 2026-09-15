@@ -3,7 +3,7 @@ model-service/tests/test_team_style.py
 TeamStyleProfile 初始化的单测。
 
 注意：维度强弱分类、通过率、难度上限等「涌现指标」不再在 team_style.py 计算，
-而是由 StyleMemory（style_memory.py）通过 SPADE 反思涌现。本测试只覆盖初始画像构建。
+而是由 StyleMemory（style_memory.py）通过反思涌现。本测试只覆盖初始画像构建。
 """
 from __future__ import annotations
 

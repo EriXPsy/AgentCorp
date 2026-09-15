@@ -5,7 +5,7 @@
  * 前端只调同源 /api/llm/chat，承接方二选一：
  * - Web 预览 / vite dev：vite-plugin-llm-proxy（stream:false 写死，前端分段 reveal 兜底）；
  * - 打包版 Electron：electron/api/routes/llm-chat.ts（支持 SSE 真流式透传，
- *   上游可为华为昇腾 MindIE / vLLM-Ascend 等任意 OpenAI 兼容端点）。
+ *   上游可为国产 NPU（MindIE / vLLM-Ascend）等任意 OpenAI 兼容端点）。
  * API key 只在服务端读取，前端绝不接触。
  *
  * 这是「真实执行」而非 mock：把任务内容作为 prompt 交给真实模型，返回模型的
@@ -119,7 +119,7 @@ export const REAL_CHAT_DEFAULT_TIMEOUT_MS = 120_000;
  */
 /**
  * 流式增量回调选项。请求带 stream:true：后端支持 SSE（electron host-api 路由 +
- * 昇腾 MindIE / vLLM-Ascend 等 OpenAI 兼容上游）时逐 chunk 真流式回调；
+ * 国产 NPU（MindIE / vLLM-Ascend）等 OpenAI 兼容上游）时逐 chunk 真流式回调；
  * 不支持（如 web 预览的 vite proxy 写死 stream:false）时回退为全文分段
  * reveal（见 ./streaming-reveal）。两条路径对调用方接口一致（onDelta 收累积文本，末次即全文）。
  */

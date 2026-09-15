@@ -1,10 +1,10 @@
 """
 model-service/app/scoring/designer.py
-SPADE Designer 角色：根据团队 StyleMemory（语义记忆）生成自适应可执行测试环境。
+自适应出题器（Designer）角色：根据团队 StyleMemory（语义记忆）生成自适应可执行测试环境。
 
 为什么不手工写题库：
 - 固定题库所有人跑同样的题 → 高分段团队秒杀、低分段团队全挂，区分度为零
-- SPADE 的核心发现：Designer 产出「刚好在能力前沿」的题目时学习效率最高
+- 自适应出题的核心发现：Designer 产出「刚好在能力前沿」的题目时学习效率最高
 - 每个团队风格不同（前端重 UI 逻辑、后端重数据处理、安全重输入校验），
   通用题无法精准衡量各自的真实水平
 
@@ -263,7 +263,7 @@ def _validate_harness(spec: SandboxSpec, entry_function: str) -> bool:
 # DesignerEvaluator — 注册进 JudgeRegistry
 # ======================================================================
 class DesignerEvaluator:
-    """SPADE Designer：消费 TeamStyleProfile，产出自适应题目。
+    """自适应出题器（Designer）：消费 TeamStyleProfile，产出自适应题目。
 
     注册为 JudgeRegistry evaluator，可通过 dispatch("designer", ...) 调用。
     降级契约：LLM 不可用时返回 degraded=True + 空 evidence。
