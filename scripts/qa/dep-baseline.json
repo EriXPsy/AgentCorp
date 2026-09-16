@@ -1,0 +1,8 @@
+{
+  "total": 61,
+  "byRule": {
+    "components-must-not-import-pages": 11,
+    "electron-main-must-not-import-renderer": 30,
+    "pages-must-not-import-other-pages": 20
+  }
+}
