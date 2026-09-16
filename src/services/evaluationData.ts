@@ -8,7 +8,7 @@
  */
 import { hostApiFetch } from '@/lib/host-api';
 import type { A2aTraceRecord, TelemetryEvent } from '@/types/evaluation';
-import type { TokenUsageHistoryEntry } from '@electron/utils/token-usage-core';
+import type { TokenUsageHistoryEntry } from '../../shared/token-usage';
 
 /** 会话下拉框选项（与主进程 AgentSessionOption 对应） */
 export interface AgentSessionOption {

@@ -1,0 +1,170 @@
+{
+  "threshold": 600,
+  "count": 41,
+  "files": [
+    {
+      "file": "electron/main/ipc-handlers.ts",
+      "lines": 2800
+    },
+    {
+      "file": "src/stores/chat.ts",
+      "lines": 2555
+    },
+    {
+      "file": "src/pages/Setup/index.tsx",
+      "lines": 1789
+    },
+    {
+      "file": "src/components/settings/ProvidersSettings.tsx",
+      "lines": 1404
+    },
+    {
+      "file": "src/engine/squad/squadOrchestration.ts",
+      "lines": 1378
+    },
+    {
+      "file": "src/pages/Settings/index.tsx",
+      "lines": 1363
+    },
+    {
+      "file": "electron/utils/channel-config.ts",
+      "lines": 1297
+    },
+    {
+      "file": "electron/utils/openclaw-auth.ts",
+      "lines": 1224
+    },
+    {
+      "file": "electron/api/routes/memory.ts",
+      "lines": 1169
+    },
+    {
+      "file": "electron/services/session-runtime-manager.ts",
+      "lines": 1162
+    },
+    {
+      "file": "src/office/engine/officeState.ts",
+      "lines": 1112
+    },
+    {
+      "file": "src/pages/Costs/index.tsx",
+      "lines": 1109
+    },
+    {
+      "file": "src/lib/api-client.ts",
+      "lines": 1072
+    },
+    {
+      "file": "src/office/engine/renderer.ts",
+      "lines": 1050
+    },
+    {
+      "file": "src/pages/Chat/ChatInput.tsx",
+      "lines": 1008
+    },
+    {
+      "file": "electron/gateway/manager.ts",
+      "lines": 989
+    },
+    {
+      "file": "src/office/components/OfficeCanvas.tsx",
+      "lines": 944
+    },
+    {
+      "file": "electron/utils/agent-config.ts",
+      "lines": 941
+    },
+    {
+      "file": "electron/utils/openclaw-workspace.ts",
+      "lines": 922
+    },
+    {
+      "file": "src/stores/autoWorker.ts",
+      "lines": 848
+    },
+    {
+      "file": "src/services/judgeClient.ts",
+      "lines": 826
+    },
+    {
+      "file": "src/pages/TeamOverview/index.tsx",
+      "lines": 812
+    },
+    {
+      "file": "src/pages/Evaluation/index.tsx",
+      "lines": 811
+    },
+    {
+      "file": "src/pages/Office/TaskBoard.tsx",
+      "lines": 809
+    },
+    {
+      "file": "src/stores/interview.ts",
+      "lines": 774
+    },
+    {
+      "file": "src/lib/team-task-chat.ts",
+      "lines": 758
+    },
+    {
+      "file": "src/pages/Chat/ChatMessage.tsx",
+      "lines": 757
+    },
+    {
+      "file": "src/pages/Chat/TeamChatView.tsx",
+      "lines": 740
+    },
+    {
+      "file": "electron/utils/gemini-cli-oauth.ts",
+      "lines": 740
+    },
+    {
+      "file": "src/pages/TeamMap/index.tsx",
+      "lines": 734
+    },
+    {
+      "file": "src/pages/Models/index.tsx",
+      "lines": 719
+    },
+    {
+      "file": "src/types/evaluation.ts",
+      "lines": 714
+    },
+    {
+      "file": "src/pages/AgentDetail/index.tsx",
+      "lines": 701
+    },
+    {
+      "file": "src/pages/TeamBuilder/index.tsx",
+      "lines": 688
+    },
+    {
+      "file": "electron/main/index.ts",
+      "lines": 688
+    },
+    {
+      "file": "src/pages/Marketplace/index.tsx",
+      "lines": 662
+    },
+    {
+      "file": "electron/main/updater.ts",
+      "lines": 628
+    },
+    {
+      "file": "src/types/channel.ts",
+      "lines": 625
+    },
+    {
+      "file": "electron/api/routes/memory-extract.ts",
+      "lines": 618
+    },
+    {
+      "file": "src/engine/interview/questionBank.ts",
+      "lines": 607
+    },
+    {
+      "file": "src/pages/Chat/TeamTaskChatView.tsx",
+      "lines": 602
+    }
+  ]
+}

@@ -1,18 +1,5 @@
-export interface TokenUsageHistoryEntry {
-  timestamp: string;
-  sessionId: string;
-  agentId: string;
-  cronJobId?: string;
-  model?: string;
-  provider?: string;
-  content?: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  costUsd?: number;
-}
+export type { TokenUsageHistoryEntry } from '../../shared/token-usage';
+import type { TokenUsageHistoryEntry } from '../../shared/token-usage';
 
 export function extractSessionIdFromTranscriptFileName(fileName: string): string | undefined {
   if (!fileName.endsWith('.jsonl') && !fileName.includes('.jsonl.reset.')) return undefined;

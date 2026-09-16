@@ -69,6 +69,26 @@ export default [
       // TS-aware 变体的 ignoreDeclarationMerge 也不覆盖这种配对；真正的重复声明由 tsc 报错。
       'no-redeclare': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
+      // 体积门禁第一阶段（refactor PR-1）：先 warn 建立可见性，PR-5 收紧为 error。
+      // 配合 scripts/qa/size-budget.mjs（>600 行 ratchet，只减不增）双轨推进。
+      'max-lines': ['warn', { max: 400, skipBlankLines: true }],
+      'max-lines-per-function': ['warn', { max: 80 }],
+    },
+  },
+  {
+    // React 组件（含容器组件）函数体天然较长，放宽到 250；
+    // 仅作用于组件文件，普通 .ts 逻辑文件仍按 80 触发。
+    files: ['src/**/*.tsx', 'electron/**/*.tsx'],
+    rules: {
+      'max-lines-per-function': ['warn', { max: 250 }],
+    },
+  },
+  {
+    // 测试文件不适用行数门禁（fixture/setup 密集，且不在拆分范围内）。
+    files: ['tests/**/*.{ts,tsx}'],
+    rules: {
+      'max-lines': 'off',
+      'max-lines-per-function': 'off',
     },
   },
 ];

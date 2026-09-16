@@ -7,7 +7,7 @@
  * buildRoiSnapshot 为纯函数，保留在渲染层供编排 store 与单测直接使用。
  */
 import { collectRunData } from '@/services/evaluationData';
-import type { TokenUsageHistoryEntry } from '@electron/utils/token-usage-core';
+import type { TokenUsageHistoryEntry } from '../../shared/token-usage';
 import {
   computeRoi,
   DEFAULT_ROI_BASELINE,
