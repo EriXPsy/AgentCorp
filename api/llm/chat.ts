@@ -10,6 +10,13 @@
  * 绝不要加 VITE_ 前缀——那会把 key 打进浏览器包。
  *
  * 不引 @vercel/node：用最小结构类型声明，Vercel 构建时按其 Node runtime 调用。
+ *
+ * 模块格式：Vercel 构建器从「入口文件所在目录」向上解析 tsconfig。本目录的
+ * api/tsconfig.json 固定 `module: CommonJS`，避免命中根 tsconfig.json 的
+ * `module: ESNext` 而产出 ESM 语法——本项目无 `"type": "module"`，Node 会按
+ * ESM 语义加载并因扩展名省略的相对导入 `'../_llm-core'` 解析失败，导致函数在
+ * 模块加载期崩溃（线上表现为 GET/POST 一律 500 FUNCTION_INVOCATION_FAILED）。
+ * 详见 tests/unit/llm-chat-vercel-bundle.test.ts。
  */
 import { handleLlmChat } from '../_llm-core';
 

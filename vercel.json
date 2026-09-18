@@ -7,5 +7,10 @@
     "env": {
       "ELECTRON_SKIP_BINARY_DOWNLOAD": "1"
     }
+  },
+  "functions": {
+    "api/llm/chat.ts": {
+      "includeFiles": "api/**"
+    }
   }
 }
